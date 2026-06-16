@@ -33,6 +33,7 @@ def crear_tablas():
             apellidos TEXT NOT NULL,
             fecha_nacimiento TEXT NOT NULL,
             telefono TEXT,
+            correo TEXT,
             direccion TEXT,
             tipo_contrato TEXT NOT NULL, -- 'velacion' o 'completo'
             fecha_inicio TEXT NOT NULL   -- Formato: YYYY-MM-DD
