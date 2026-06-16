@@ -4,13 +4,13 @@ from datetime import datetime
 import sys
 import os
 
-# Asegurar que encuentre los otros módulos
+# Asegurar que el intérprete de Python encuentre los módulos en carpetas superiores
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.conexion import conectar
 from logic.consultas import consultar_estado_cliente
 
 # =========================================================================
-# FUNCIONES DE VALIDACIÓN Y UTILERÍAS
+# FUNCIONES DE VALIDACIÓN Y UTILERÍAS (LÓGICA INTERNA)
 # =========================================================================
 
 def validar_cedula_titular(texto_actualizado):
@@ -37,18 +37,19 @@ def validar_solo_letras(texto_actualizado):
     return texto_actualizado.replace(" ", "").isalpha()
 
 def calcular_edad_exacta(fecha_str):
-    """Profesor: Adaptada para procesar barras diagonales (DD/MM/YYYY) de forma segura."""
     try:
         if len(fecha_str) != 10:
             return None
         fecha_nac = datetime.strptime(fecha_str, "%d/%m/%Y")
         hoy = datetime.now()
+        # Explicación del Profesor: Se resta 1 si el mes/día actual es menor al de nacimiento
         edad = hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
         return edad if edad >= 0 else None
     except:
         return None
 
 def vincular_salto_enter(widget_actual, widget_siguiente):
+    """Asocia la tecla Enter para desplazar el foco del teclado a otro control."""
     widget_actual.bind("<Return>", lambda event: widget_siguiente.focus())
 
 # =========================================================================
@@ -58,25 +59,27 @@ def vincular_salto_enter(widget_actual, widget_siguiente):
 def mostrar_dashboard():
     ventana = ctk.CTk()
     ventana.title("Sistema Funerario - Panel de Control")
-    ventana.geometry("1050x750")
+    ventana.geometry("1050x800") # Aumentamos ligeramente el alto para acomodar los nuevos campos
     
     v_ced_tit = ventana.register(validar_cedula_titular)
     v_ced_fam = ventana.register(validar_cedula_familiar)
     v_letras = ventana.register(validar_solo_letras)
     
+    # Configuración visual de las tablas del sistema
     style = ttk.Style()
     style.theme_use("clam")
     style.configure("Treeview", background="#2a2a2a", foreground="white", fieldbackground="#2a2a2a", rowheight=25)
     style.map("Treeview", background=[('selected', '#1f538d')])
     style.configure("Treeview.Heading", background="#1f538d", foreground="white", font=("Arial", 10, "bold"))
 
-    pestanas = ctk.CTkTabview(ventana, width=1010, height=700)
+    pestanas = ctk.CTkTabview(ventana, width=1010, height=750)
     pestanas.pack(pady=10, padx=10, fill="both", expand=True)
     
     tab_clientes = pestanas.add("Registro de Clientes")
     tab_edicion = pestanas.add("Edición de Titulares y Afiliados")
     tab_pagos = pestanas.add("Control de Pagos y Estado")
     
+    # Estructura mutable (Lista) para preservar la cédula activa en memoria entre funciones
     cedula_titular_edicion = [""]
 
     # =========================================================================
@@ -97,29 +100,18 @@ def mostrar_dashboard():
     txt_apellidos = ctk.CTkEntry(frame_form_reg, width=220, validate="key", validatecommand=(v_letras, '%P'))
     txt_apellidos.grid(row=1, column=2, padx=10, pady=(2,10), sticky="w")
     
-    # Profesor: Modificado el placeholder para indicar el uso de barras "/"
     ctk.CTkLabel(frame_form_reg, text="Fecha de Nacimiento:", font=("Arial", 12, "bold")).grid(row=2, column=0, padx=10, sticky="w")
     txt_fecha_nac = ctk.CTkEntry(frame_form_reg, placeholder_text="DD/MM/YYYY", width=180)
     txt_fecha_nac.grid(row=3, column=0, padx=10, pady=(2,10), sticky="w")
     
-    # Profesor: Añadido color de fondo amarillo con letras negras para un contraste perfecto de la edad
-    lbl_edad_titular = ctk.CTkLabel(
-        frame_form_reg, 
-        text=" Edad: -- años ", 
-        font=("Arial", 12, "bold"), 
-        fg_color="#f39c12", 
-        text_color="black",
-        corner_radius=6
-    )
+    lbl_edad_titular = ctk.CTkLabel(frame_form_reg, text=" Edad: -- años ", font=("Arial", 12, "bold"), fg_color="#f39c12", text_color="black", corner_radius=6)
     lbl_edad_titular.grid(row=3, column=1, padx=10, pady=(2,10), sticky="w")
     
     def disparar_calculo_edad(*args):
         texto = txt_fecha_nac.get().strip()
         edad = calcular_edad_exacta(texto)
-        if edad is not None: 
-            lbl_edad_titular.configure(text=f" Edad: {edad} años ")
-        else: 
-            lbl_edad_titular.configure(text=" Edad: -- años ")
+        if edad is not None: lbl_edad_titular.configure(text=f" Edad: {edad} años ")
+        else: lbl_edad_titular.configure(text=" Edad: -- años ")
             
     txt_fecha_nac.bind("<KeyRelease>", disparar_calculo_edad)
     
@@ -202,7 +194,6 @@ def mostrar_dashboard():
     
     def abrir_ventana_familiares():
         ced_t = txt_cedula.get().strip().upper()
-        # Profesor: Le pasamos también la función para refrescar la Pestaña 1
         abrir_modulo_familiares(ventana, ced_t, v_ced_fam, v_letras, lambda: refrescar_tabla_familiares(ced_t))
 
     btn_add_fam = ctk.CTkButton(tab_clientes, text="+ Agregar Familiar", fg_color="#1f538d", state="disabled", command=abrir_ventana_familiares)
@@ -212,7 +203,7 @@ def mostrar_dashboard():
     btn_salir_t1.grid(row=2, column=2, pady=10, padx=10, sticky="e")
 
     # =========================================================================
-    # PESTAÑA 2: EDICIÓN COMPLETA (CON RETIRO TOTALMENTE SINCRONIZADO)
+    # PESTAÑA 2: EDICIÓN DE TITULARES Y AFILIADOS (NUEVAS MEJORAS)
     # =========================================================================
     frame_busq_ed = ctk.CTkFrame(tab_edicion, fg_color="transparent")
     frame_busq_ed.pack(pady=10, padx=10, fill="x")
@@ -221,22 +212,38 @@ def mostrar_dashboard():
     txt_busq_ed = ctk.CTkEntry(frame_busq_ed, width=350)
     txt_busq_ed.grid(row=1, column=0, padx=10, pady=5, sticky="w")
     
+    # Profesor: Etiqueta dinámica para proyectar la fecha de contrato del cliente seleccionado
+    lbl_fecha_contrato_ed = ctk.CTkLabel(frame_busq_ed, text="fecha de contrato: --/--/----", font=("Arial", 12, "italic", "bold"), text_color="#3498db")
+    lbl_fecha_contrato_ed.grid(row=1, column=2, padx=20, sticky="w")
+    
+    # Contenedor principal de los campos modificables del titular buscado
     frame_campos_ed = ctk.CTkFrame(tab_edicion)
     frame_campos_ed.pack(pady=5, padx=10, fill="x")
     
-    ctk.CTkLabel(frame_campos_ed, text="Modificar Teléfono:", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=10, sticky="w")
-    txt_ed_tel = ctk.CTkEntry(frame_campos_ed, width=180)
-    txt_ed_tel.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+    # Profesor: Añadidos los campos 'Nombres' y 'Apellidos' para permitir correcciones ortográficas
+    ctk.CTkLabel(frame_campos_ed, text="Modificar Nombres:", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=10, sticky="w")
+    txt_ed_nom = ctk.CTkEntry(frame_campos_ed, width=180, validate="key", validatecommand=(v_letras, '%P'))
+    txt_ed_nom.grid(row=1, column=0, padx=10, pady=5, sticky="w")
     
-    ctk.CTkLabel(frame_campos_ed, text="Modificar Correo:", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=10, sticky="w")
+    ctk.CTkLabel(frame_campos_ed, text="Modificar Apellidos:", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=10, sticky="w")
+    txt_ed_ape = ctk.CTkEntry(frame_campos_ed, width=180, validate="key", validatecommand=(v_letras, '%P'))
+    txt_ed_ape.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+    
+    ctk.CTkLabel(frame_campos_ed, text="Modificar Teléfono:", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
+    txt_ed_tel = ctk.CTkEntry(frame_campos_ed, width=150)
+    txt_ed_tel.grid(row=1, column=2, padx=10, pady=5, sticky="w")
+    
+    ctk.CTkLabel(frame_campos_ed, text="Modificar Correo:", font=("Arial", 11, "bold")).grid(row=2, column=0, padx=10, sticky="w")
     txt_ed_corr = ctk.CTkEntry(frame_campos_ed, width=220)
-    txt_ed_corr.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+    txt_ed_corr.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="w")
     
-    ctk.CTkLabel(frame_campos_ed, text="Modificar Dirección de Habitación:", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
+    ctk.CTkLabel(frame_campos_ed, text="Modificar Dirección de Habitación:", font=("Arial", 11, "bold")).grid(row=2, column=2, padx=10, sticky="w")
     txt_ed_dir = ctk.CTkEntry(frame_campos_ed, width=350)
-    txt_ed_dir.grid(row=1, column=2, padx=10, pady=5, sticky="w")
+    txt_ed_dir.grid(row=3, column=2, padx=10, pady=5, sticky="w")
     
-    vincular_salto_enter(txt_busq_ed, txt_ed_tel)
+    # Cadena de navegación rápida interna
+    vincular_salto_enter(txt_ed_nom, txt_ed_ape)
+    vincular_salto_enter(txt_ed_ape, txt_ed_tel)
     vincular_salto_enter(txt_ed_tel, txt_ed_corr)
     vincular_salto_enter(txt_ed_corr, txt_ed_dir)
 
@@ -256,23 +263,33 @@ def mostrar_dashboard():
     tabla_ed.pack(fill="both", expand=True)
 
     def cargar_datos_edicion():
+        """Profesor: Esta función extrae el registro completo del cliente de la DB, incluyendo nombres y la fecha de contrato."""
         criterio = txt_busq_ed.get().strip().lower()
         if not criterio: return
         
         conn = conectar()
         cursor = conn.cursor()
+        # Se solicita explícitamente nombres, apellidos y fecha_inicio desde SQL
         cursor.execute("""
-            SELECT cedula, telefono, correo, direccion FROM titulares 
+            SELECT cedula, telefono, correo, direccion, nombres, apellidos, fecha_inicio FROM titulares 
             WHERE cedula LIKE ? OR nombres LIKE ? OR apellidos LIKE ?
         """, (f"%{criterio}%", f"%{criterio}%", f"%{criterio}%"))
         res = cursor.fetchone()
         
         if res:
             cedula_titular_edicion[0] = res[0]
+            # Inyección de los datos encontrados en las cajas de texto correspondientes
+            txt_ed_nom.delete(0, "end"); txt_ed_nom.insert(0, res[4].title() if res[4] else "")
+            txt_ed_ape.delete(0, "end"); txt_ed_ape.insert(0, res[5].title() if res[5] else "")
             txt_ed_tel.delete(0, "end"); txt_ed_tel.insert(0, res[1] if res[1] else "")
             txt_ed_corr.delete(0, "end"); txt_ed_corr.insert(0, res[2] if res[2] else "")
             txt_ed_dir.delete(0, "end"); txt_ed_dir.insert(0, res[3] if res[3] else "")
             
+            # Formatear y actualizar la etiqueta de fecha del contrato en pantalla
+            f_contrato = res[6] if res[6] else "--/--/----"
+            lbl_fecha_contrato_ed.configure(text=f"fecha de contrato  {f_contrato}")
+            
+            # Re-dibujar los familiares vinculados a la cédula del titular
             for item in tabla_ed.get_children(): tabla_ed.delete(item)
             cursor.execute("SELECT id, cedula, nombres, apellidos, parentesco FROM familiares WHERE titular_cedula = ?", (res[0],))
             for f in cursor.fetchall():
@@ -281,29 +298,43 @@ def mostrar_dashboard():
             btn_actualizar.configure(state="normal")
             btn_retirar_fam.configure(state="normal")
             btn_add_fam_ed.configure(state="normal")
+            txt_ed_nom.focus() # Mueve el cursor automáticamente al primer campo cargado
         else:
             messagebox.showerror("Error", "No se encontró ningún registro coincidente.")
         conn.close()
 
     btn_bus_ed = ctk.CTkButton(frame_busq_ed, text="Buscar Contrato", width=120, command=cargar_datos_edicion)
     btn_bus_ed.grid(row=1, column=1, padx=10, pady=5)
+    
+    # Profesor: Vinculamos la tecla ENTER a la caja de búsqueda para ejecutar la consulta de inmediato
+    txt_busq_ed.bind("<Return>", lambda event: cargar_datos_edicion())
 
     def actualizar_titular_y_afiliados():
+        """Profesor: Actualiza los cambios en la tabla 'titulares', permitiendo ahora salvar nombres y apellidos nuevos."""
         ced = cedula_titular_edicion[0]
+        nom = txt_ed_nom.get().strip().lower()
+        ape = txt_ed_ape.get().strip().lower()
         tel = txt_ed_tel.get().strip()
         corr = txt_ed_corr.get().strip().lower()
         dir_h = txt_ed_dir.get().strip().lower()
         
+        if not nom or not ape:
+            messagebox.showwarning("Campos Requeridos", "Los nombres y apellidos no pueden guardarse vacíos.")
+            return
+            
         conn = conectar()
         cursor = conn.cursor()
-        cursor.execute("UPDATE titulares SET telefono = ?, correo = ?, direccion = ? WHERE cedula = ?", (tel, corr, dir_h, ced))
+        cursor.execute("""
+            UPDATE titulares 
+            SET nombres = ?, apellidos = ?, telefono = ?, correo = ?, direccion = ? 
+            WHERE cedula = ?
+        """, (nom, ape, tel, corr, dir_h, ced))
         conn.commit()
         conn.close()
         messagebox.showinfo("Éxito", "Información del contrato actualizada.")
         cargar_datos_edicion()
 
     def eliminar_familiar_seleccionado():
-        """Profesor: Sincronizada para limpiar simultáneamente la tabla de la Pestaña 1."""
         seleccionado = tabla_ed.selection()
         if not seleccionado:
             messagebox.showwarning("Selección", "Por favor seleccione un afiliado de la lista.")
@@ -318,13 +349,10 @@ def mostrar_dashboard():
             conn.close()
             messagebox.showinfo("Éxito", "Familiar retirado.")
             
-            # 1. Refrescar la tabla actual (Pestaña 2)
             cargar_datos_edicion()
-            # 2. Profesor: Obligamos a la Pestaña 1 a redibujar los datos vigentes
             refrescar_tabla_familiares(cedula_titular_edicion[0])
 
     def agregar_familiar_desde_edicion():
-        # Al agregar desde aquí, refresca ambas vistas al guardarse
         abrir_modulo_familiares(ventana, cedula_titular_edicion[0], v_ced_fam, v_letras, lambda: [cargar_datos_edicion(), refrescar_tabla_familiares(cedula_titular_edicion[0])])
 
     frame_botones_ed = ctk.CTkFrame(tab_edicion, fg_color="transparent")
@@ -459,7 +487,7 @@ def mostrar_dashboard():
     ventana.mainloop()
 
 # =========================================================================
-# COMPONENTE MODAL: AGREGAR FAMILIARES (TECLADO AUTOMÁTICO COMPLETO)
+# COMPONENTE MODAL: AGREGAR FAMILIARES
 # =========================================================================
 def abrir_modulo_familiares(ventana_padre, cedula_titular, v_ced, v_let, funcion_exito_refrescar):
     conn = conectar()
@@ -469,7 +497,7 @@ def abrir_modulo_familiares(ventana_padre, cedula_titular, v_ced, v_let, funcion
     conn.close()
     
     if cantidad >= 8:
-        messagebox.showwarning("Límite", "Máximo de 8 familiares alcanzado.")
+        messagebox.showwarning("Límite", "Máximo de 8 familiares amparados alcanzado.")
         return
 
     pop = ctk.CTkToplevel(ventana_padre)
@@ -493,7 +521,6 @@ def abrir_modulo_familiares(ventana_padre, cedula_titular, v_ced, v_let, funcion
     txt_fparentesco = ctk.CTkEntry(pop, width=280, validate="key", validatecommand=(v_let, '%P'))
     txt_fparentesco.pack(pady=2, padx=20)
     
-    # Profesor: Forzamos a que el cursor parpadee de inmediato en la cédula al abrirse
     txt_fcedula.focus_set()
 
     vincular_salto_enter(txt_fcedula, txt_fnombre)
@@ -518,11 +545,10 @@ def abrir_modulo_familiares(ventana_padre, cedula_titular, v_ced, v_let, funcion
         conn.commit()
         conn.close()
         
-        messagebox.showinfo("Éxito", "Familiar agregado correctamente.")
+        messagebox.showinfo("Éxito", "Familiar amparado con éxito.")
         funcion_exito_refrescar()
         pop.destroy()
 
-    # Profesor: Vinculamos la tecla Enter de la última casilla (Parentesco) para guardar de una vez
     txt_fparentesco.bind("<Return>", lambda event: guardar_familiar())
 
     btn_fguardar = ctk.CTkButton(pop, text="Registrar Familiar", fg_color="green", command=guardar_familiar)
