@@ -9,7 +9,7 @@ from database.conexion import conectar
 def obtener_meses_transcurridos(fecha_inicio_str):
     """Calcula cuántos meses han pasado desde la fecha de inicio hasta hoy."""
     # CAMBIO AQUÍ: Ahora convertimos usando el formato Latinoamericano DD-MM-YYYY
-    fecha_inicio = datetime.strptime(fecha_inicio_str, "%d-%m-%Y")
+    fecha_inicio = datetime.strptime(fecha_inicio_str, "%d/%m/%Y")
     fecha_hoy = datetime.now()
     
     # Fórmula matemática para calcular la diferencia en meses exactos
