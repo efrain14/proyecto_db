@@ -333,6 +333,32 @@ def mostrar_dashboard():
         except Exception as e:
             messagebox.showerror("Error de Duplicidad", f"La cédula o el número de contrato ya se encuentran registrados en el sistema.\n{e}")
 
+    def limpiar_formulario_registro():
+        """Resetea el formulario de la Pestaña 1 para ingresar un nuevo contrato."""
+        txt_cedula.delete(0, "end")
+        txt_cont_viejo.delete(0, "end")
+        txt_nombres.delete(0, "end")
+        txt_apellidos.delete(0, "end")
+        txt_fecha_nac.delete(0, "end")
+        txt_telefono.delete(0, "end")
+        txt_recibos_previos.delete(0, "end")
+        txt_correo.delete(0, "end")
+        txt_direccion.delete(0, "end")
+        combo_contrato.set("PPA velación 24 meses")
+        
+        lbl_edad_titular.configure(text=" Edad: -- años ")
+        
+        txt_cont_nuevo.configure(state="normal")
+        txt_cont_nuevo.delete(0, "end")
+        txt_cont_nuevo.insert(0, generar_siguiente_contrato())
+        txt_cont_nuevo.configure(state="disabled")
+        
+        for item in tabla.get_children():
+            tabla.delete(item)
+            
+        btn_add_fam.configure(state="disabled")
+        txt_cedula.focus()
+
     def cargar_datos_edicion():
         crit = txt_busq_ed.get().strip().upper()
         if not crit: return
@@ -530,26 +556,44 @@ def mostrar_dashboard():
         except Exception as e:
             messagebox.showerror("Error", f"Fallo al registrar cobro.\nDetalle: {e}")
 
-    # =========================================================================
+   # =========================================================================
     # ENLACES DIRECTOS Y BOTONES FÍSICOS
     # =========================================================================
+    
     # 1. Enlaces de la Pestaña de Control de Pagos
     btn_buscar = ctk.CTkButton(frame_busq_pagos, text="Verificar Estado", width=120, command=buscar_y_calcular_pagos)
     btn_buscar.grid(row=1, column=1, padx=10, pady=5)
     txt_busqueda_ced.bind("<Return>", lambda e: buscar_y_calcular_pagos())
 
-    # 2. CORRECCIÓN AQUÍ: Enlace para la casilla de búsqueda en la Pestaña de Edición
-    # Esto hace que al escribir la cédula y presionar ENTER en edición, jale los datos de inmediato
+    # 2. Enlace para la casilla de búsqueda en la Pestaña de Edición
     txt_busq_ed.bind("<Return>", lambda e: cargar_datos_edicion())
 
-    # 3. Botones de la Pestaña de Registro
-    btn_guardar_tit = ctk.CTkButton(tab_clientes, text="Guardar Titular", fg_color="green", command=guardar_titular)
-    btn_guardar_tit.grid(row=2, column=0, pady=10, padx=10, sticky="w")
-    
-    btn_add_fam = ctk.CTkButton(tab_clientes, text="+ Agregar Familiar", fg_color="#1f538d", state="disabled", command=lambda: abrir_modulo_familiares(ventana, txt_cedula.get().strip().upper(), v_letras, lambda: refrescar_tabla_familiares(txt_cedula.get().strip().upper())))
-    btn_add_fam.grid(row=2, column=1, pady=10, padx=10, sticky="w")
-    
-    ctk.CTkButton(tab_clientes, text="Salir del Sistema", fg_color="#d35400", command=ventana.destroy).grid(row=2, column=2, pady=10, padx=10, sticky="e")
+    # 3. Botones de la Pestaña de Registro de Clientes (Alineación Perfecta en Línea)
+    frame_botones_registro = ctk.CTkFrame(tab_clientes, fg_color="transparent")
+    frame_botones_registro.grid(row=2, column=0, columnspan=4, pady=15, padx=10, sticky="ew")
+
+    btn_guardar_tit = ctk.CTkButton(frame_botones_registro, text="Guardar Titular", fg_color="green", command=guardar_titular)
+    btn_guardar_tit.pack(side="left", padx=5)
+
+    btn_add_fam = ctk.CTkButton(
+        frame_botones_registro, 
+        text="+ Agregar Familiar", 
+        fg_color="#1f538d", 
+        state="disabled", 
+        command=lambda: abrir_modulo_familiares(
+            ventana, 
+            txt_cedula.get().strip().upper(), 
+            v_letras, 
+            lambda: refrescar_tabla_familiares(txt_cedula.get().strip().upper())
+        )
+    )
+    btn_add_fam.pack(side="left", padx=5)
+
+    btn_nuevo_contrato = ctk.CTkButton(frame_botones_registro, text="✨ Nuevo Contrato", fg_color="#8e44ad", command=limpiar_formulario_registro)
+    btn_nuevo_contrato.pack(side="left", padx=5)
+
+    btn_salir = ctk.CTkButton(frame_botones_registro, text="Salir del Sistema", fg_color="#d35400", command=ventana.destroy)
+    btn_salir.pack(side="right", padx=5)
 
     # 4. Estructura de botones de la Pestaña de Edición
     frame_botones_ed = ctk.CTkFrame(tab_edicion, fg_color="transparent")
