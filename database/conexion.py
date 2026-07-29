@@ -42,11 +42,16 @@ def inicializar_base_de_datos():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pagos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            titular_cedula TEXT,
-            monto_usd REAL,
-            tasa_bcv REAL,
-            monto_bs REAL,
-            fecha_pago TEXT,
+            titular_cedula TEXT NOT NULL,
+            num_recibo INTEGER NOT NULL,
+            monto_usd REAL NOT NULL,
+            monto_bs REAL NOT NULL,
+            tasa_bcv REAL NOT NULL,
+            metodo_pago TEXT NOT NULL,
+            banco_origen TEXT,
+            banco_destino TEXT,
+            numero_referencia TEXT,
+            fecha_pago TEXT NOT NULL,
             FOREIGN KEY (titular_cedula) REFERENCES titulares (cedula)
         )
     """)

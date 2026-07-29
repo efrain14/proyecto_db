@@ -16,6 +16,9 @@ SEDE_ACTUAL = "A"
 # =========================================================================
 # VALIDADORES NATIVOS Y FUNCIONES LÓGICAS DE SOPORTE
 # =========================================================================
+def validar_solo_numeros(char):
+    """Permite únicamente el ingreso de dígitos numéricos en los Entry."""
+    return char.isdigit() or char == ""
 
 def validar_mascara_cedula(cedula_texto):
     """Filtro Estricto de Cédulas (RegEx)"""
@@ -85,9 +88,11 @@ def generar_siguiente_contrato():
 
 def mostrar_dashboard():
     ventana = ctk.CTk()
+    
     ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL})")
     ventana.geometry("1150x850")
-    
+    # Registrar la regla de validación en la ventana activa
+    v_numeros = ventana.register(validar_solo_numeros)
     v_letras = ventana.register(validar_solo_letras)
     v_tasa_num = ventana.register(validar_monto_tasa)
     
@@ -259,20 +264,75 @@ def mostrar_dashboard():
     lbl_up_detalles = ctk.CTkLabel(frame_ultimo_pago, text="Historial de Cobros: Sin registrar búsquedas.", font=("Arial", 12, "italic"))
     lbl_up_detalles.pack(pady=5, padx=10, anchor="w")
 
+    # -------------------------------------------------------------------------
+    # FRAME DE COBRO ACTUALIZADO CON MONTO BS Y DATOS BANCARIOS
+    # -------------------------------------------------------------------------
     frame_cobro = ctk.CTkFrame(tab_pagos, fg_color="transparent")
     frame_cobro.pack(pady=10, padx=20, fill="x")
     
-    ctk.CTkLabel(frame_cobro, text="Tasa Oficial BCV (Bs.):", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=10, sticky="w")
+    # --- FILA 0: Tasa, Forma de Pago, Monto en Bs y Etiqueta de Cálculo ---
+    ctk.CTkLabel(frame_cobro, text="Tasa Oficial BCV (Bs.):", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=10, sticky="w")
+    txt_tasa = ctk.CTkEntry(frame_cobro, width=130, placeholder_text="0.00", state="disabled", validate="key", validatecommand=(v_tasa_num, '%P'))
+    txt_tasa.grid(row=1, column=0, padx=10, pady=5, sticky="w")
     
-    txt_tasa = ctk.CTkEntry(frame_cobro, width=150, placeholder_text="0.00", state="disabled", validate="key", validatecommand=(v_tasa_num, '%P'))
-    txt_tasa.grid(row=1, column=0, padx=10, pady=5)
+    # Función para controlar la activación de campos bancarios
+    def alternar_campos_bancarios_cobro(metodo):
+        """Habilita los bancos y referencia solo si es Transferencia o Pago Móvil."""
+        es_bancario = metodo in ["Transferencia", "Pago Móvil"]
+        estado = "normal" if es_bancario else "disabled"
+        
+        txt_banco_origen.configure(state=estado)
+        txt_banco_destino.configure(state=estado)
+        txt_num_referencia.configure(state=estado)
+        
+        if not es_bancario:
+            # Limpia el contenido si se cambia a Efectivo
+            txt_banco_origen.delete(0, "end")
+            txt_banco_destino.delete(0, "end")
+            txt_num_referencia.delete(0, "end")
+
+    ctk.CTkLabel(frame_cobro, text="Forma de Pago:", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=10, sticky="w")
+    combo_forma_pago = ctk.CTkComboBox(
+        frame_cobro, 
+        values=["Efectivo USD", "Efectivo Bs", "Transferencia", "Pago Móvil", "Tarjeta de debito"], 
+        width=160,
+        command=alternar_campos_bancarios_cobro # <-- Llama a la función al cambiar selección
+    )
+    combo_forma_pago.grid(row=1, column=1, padx=10, pady=5, sticky="w")
     
-    ctk.CTkLabel(frame_cobro, text="Forma de Pago:", font=("Arial", 12, "bold")).grid(row=0, column=1, padx=10, sticky="w")
-    combo_forma_pago = ctk.CTkComboBox(frame_cobro, values=["Efectivo", "Transferencia", "Tarjeta de debito", "Pago Móvil"], width=180)
-    combo_forma_pago.grid(row=1, column=1, padx=10, pady=5)
+    ctk.CTkLabel(frame_cobro, text="Monto Cobrado (Bs.):", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
+    txt_monto_bs = ctk.CTkEntry(frame_cobro, width=140, placeholder_text="0.00")
+    txt_monto_bs.grid(row=1, column=2, padx=10, pady=5, sticky="w")
     
-    lbl_calculo_bs = ctk.CTkLabel(frame_cobro, text="Monto a pagar: 0,00 Bs", font=("Arial", 14, "bold", "italic"))
-    lbl_calculo_bs.grid(row=1, column=2, padx=20, pady=5)
+    # Etiqueta plana sin borde para el cálculo
+    lbl_calculo_bs = ctk.CTkLabel(frame_cobro, text="Monto a pagar: 0,00 Bs", font=("Arial", 13, "bold", "italic"), fg_color="transparent")
+    lbl_calculo_bs.grid(row=1, column=3, padx=15, pady=5, sticky="w")
+
+    # --- FILA 1: Banco Pagador, Banco Receptor y N° Operación ---
+    lbl_b_origen = ctk.CTkLabel(frame_cobro, text="Banco Pagador:", font=("Arial", 11, "bold"))
+    lbl_b_origen.grid(row=2, column=0, padx=10, pady=(10, 0), sticky="w")
+    txt_banco_origen = ctk.CTkEntry(frame_cobro, width=140, placeholder_text="Ej: Banesco", state="disabled")
+    txt_banco_origen.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+    lbl_b_destino = ctk.CTkLabel(frame_cobro, text="Banco Receptor:", font=("Arial", 11, "bold"))
+    lbl_b_destino.grid(row=2, column=1, padx=10, pady=(10, 0), sticky="w")
+    txt_banco_destino = ctk.CTkEntry(frame_cobro, width=160, placeholder_text="Ej: Mercantil", state="disabled")
+    txt_banco_destino.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
+    lbl_ref = ctk.CTkLabel(frame_cobro, text="N° Operación (Solo Números):", font=("Arial", 11, "bold"))
+    lbl_ref.grid(row=2, column=2, padx=10, pady=(10, 0), sticky="w")
+    txt_num_referencia = ctk.CTkEntry(
+        frame_cobro, 
+        width=150, 
+        placeholder_text="Ref. Numérica", 
+        state="disabled",
+        validate="key", 
+        validatecommand=(v_numeros, '%P')  # Usamos %P para validar el texto final completo
+    )
+    txt_num_referencia.grid(row=3, column=2, padx=10, pady=5, sticky="w")
+
+    # Inicializamos el estado inicial de la forma de pago por defecto ("Efectivo USD")
+    alternar_campos_bancarios_cobro(combo_forma_pago.get())
 
     # =========================================================================
     # FUNCIONES GENERALES DE ACCIÓN AUTOMÁTICA
