@@ -42,16 +42,16 @@ def inicializar_base_de_datos():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pagos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            titular_cedula TEXT NOT NULL,
             num_recibo INTEGER NOT NULL,
-            monto_usd REAL NOT NULL,
-            monto_bs REAL NOT NULL,
-            tasa_bcv REAL NOT NULL,
-            metodo_pago TEXT NOT NULL,
+            titular_cedula TEXT NOT NULL,
+            fecha_pago TEXT NOT NULL,
+            monto_usd REAL,
+            monto_bs REAL,
+            tasa_bcv REAL,
+            forma_pago TEXT,
             banco_origen TEXT,
             banco_destino TEXT,
-            numero_referencia TEXT,
-            fecha_pago TEXT NOT NULL,
+            num_operacion TEXT,
             FOREIGN KEY (titular_cedula) REFERENCES titulares (cedula)
         )
     """)
@@ -106,6 +106,8 @@ def inicializar_base_de_datos():
     try:
         cursor.execute("ALTER TABLE pagos ADD COLUMN forma_pago TEXT;")
     except sqlite3.OperationalError: pass
+
+
 
     conn.commit()
     conn.close()

@@ -451,7 +451,9 @@ def mostrar_dashboard():
             messagebox.showerror("No Localizado", "No se encontró ningún contrato asociado al dato ingresado.")
         conn.close()
 
-    # Profesor: Corregida para jalar de forma segura y habilitar la tasa
+    # Esta función solo lee y consulta la base de datos cuando se escribe una 
+    # cédula en la Pestaña 3. Calcula la tasa BCV, los meses pendientes, los 
+    # recargos y muestra el "Monto a pagar" en la pantalla
     def buscar_y_calcular_pagos():
         ced = txt_busqueda_ced.get().strip().upper()
         if not ced: return
@@ -566,55 +568,81 @@ def mostrar_dashboard():
             cargar_datos_edicion()
             refrescar_tabla_familiares(cedula_titular_edicion[0])
 
+    #Esta es la función de acción que se ejecuta al presionar el botón "Registrar Pago"
     def ejecutar_pago():
-        ced_busq = txt_busqueda_ced.get().strip().upper()
-        tasa_raw = txt_tasa.get().strip()
+        """Registra el pago de la cuota en la base de datos de manera segura."""
         
-        if not tasa_raw or float(tasa_raw) <= 0:
-            messagebox.showwarning("Falta Información", "Por favor introduzca una tasa oficial de cambio válida.")
+        # Obtener la cédula de la variable global O directamente del campo de búsqueda si estuviera vacía
+        cedula_actual = cedula_titular_edicion[0] or txt_busqueda_ced.get().strip().upper()
+
+        # Validar que tengamos una cédula válida
+        if not cedula_actual:
+            messagebox.showwarning("Atención", "Debe buscar y seleccionar un cliente antes de procesar el pago.")
             return
-            
+
+        # Actualizamos la variable global por seguridad
+        cedula_titular_edicion[0] = cedula_actual
+
+        # 2. Capturar y limpiar variables del formulario
+        metodo = combo_forma_pago.get()
+        b_origen = txt_banco_origen.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        b_destino = txt_banco_destino.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        num_op = txt_num_referencia.get().strip() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        
+        # Validar campos bancarios en caso de pago electrónico
+        if metodo in ["Transferencia", "Pago Móvil"] and (not b_origen or not b_destino or not num_op):
+            messagebox.showwarning("Faltan Datos", "Para Transferencias y Pago Móvil debe ingresar Banco Pagador, Banco Receptor y N° Operación.")
+            return
+
+        # 3. Validar el número de recibo asignado
+        recibo_a_guardar = proximo_recibo_global[0]
+        if not recibo_a_guardar:
+            messagebox.showerror("Error de Recibo", "No se detectó un número de recibo válido asignado.")
+            return
+
+        conn = None
         try:
-            tasa = float(tasa_raw)
-            f_pago = combo_forma_pago.get()
-            
             conn = conectar()
             cursor = conn.cursor()
+            
+            # Guardar el cobro pasando explícitamente el num_recibo
             cursor.execute("""
-                SELECT cedula, contrato_viejo, contrato_nuevo, recibos_previos, tipo_contrato FROM titulares 
-                WHERE cedula=? OR UPPER(contrato_viejo)=? OR UPPER(contrato_nuevo)=?
-                   OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
-            """, (ced_busq, ced_busq, ced_busq, ced_busq))
-            t_data = cursor.fetchone()
-            
-            ced_real, c_viejo, c_nuevo, r_previos, t_contrato = t_data[0], t_data[1], t_data[2], t_data[3], t_data[4]
-            
-            usd = 12.0 if "renovación" in t_contrato.lower() else (10.0 if "velación 24" in t_contrato.lower() else 20.0)
-            bs = usd * tasa
-            fecha_p = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            
-            cursor.execute("""
-                INSERT INTO pagos (titular_cedula, monto_usd, tasa_bcv, monto_bs, fecha_pago, contrato_viejo, contrato_nuevo, numero_recibo, forma_pago) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (ced_real, usd, tasa, bs, fecha_p, c_viejo, c_nuevo, proximo_recibo_global[0], f_pago))
-            
-            cursor.execute("SELECT COUNT(*) FROM pagos WHERE titular_cedula = ?", (ced_real,))
-            pagos_sistema = cursor.fetchone()[0]
-            total_acumulado = r_previos + pagos_sistema
-            
-            if "24 meses" in t_contrato.lower() and total_acumulado >= 24:
-                cursor.execute("UPDATE titulares SET tipo_contrato = 'renovación anual 12 meses' WHERE cedula = ?", (ced_real,))
-                messagebox.showinfo("Migración de Contrato", "¡MIGRACIÓN DE CONTRATO AUTOMÁTICA!\nEl titular completó las 24 cuotas bases. Cambiado a 'renovación anual 12 meses'.")
+                INSERT INTO pagos (
+                    num_recibo, titular_cedula, fecha_pago, monto_usd, monto_bs, 
+                    tasa_bcv, forma_pago, banco_origen, banco_destino, num_operacion
+                ) VALUES (?, ?, DATE('now'), ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                recibo_a_guardar,
+                cedula_titular_edicion[0],
+                txt_monto_bs.get().strip(), # o el monto USD de la cuota según tu lógica
+                txt_monto_bs.get().strip(),
+                txt_tasa.get().strip(),
+                metodo,
+                b_origen,
+                b_destino,
+                num_op
+            ))
             
             conn.commit()
-            conn.close()
+            messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
             
-            messagebox.showinfo("Pago Exitoso", f"Recibo #{proximo_recibo_global[0]} guardado de forma exitosa.")
-            txt_tasa.delete(0, "end")
-            txt_tasa.configure(state="disabled")
+            # Limpiar entradas de cobro
+            txt_monto_bs.delete(0, "end")
+            txt_banco_origen.delete(0, "end")
+            txt_banco_destino.delete(0, "end")
+            txt_num_referencia.delete(0, "end")
+            
+            # Refrescar la pantalla de pagos para actualizar cuotas retenidas/pendientes
             buscar_y_calcular_pagos()
+            
         except Exception as e:
-            messagebox.showerror("Error", f"Fallo al registrar cobro.\nDetalle: {e}")
+            if conn:
+                conn.rollback()
+            messagebox.showerror("Fallo al registrar el cobro", f"Detalle: {e}")
+            
+        finally:
+            if conn:
+                conn.close() # <-- Libera la BD de forma segura
 
    # =========================================================================
     # ENLACES DIRECTOS Y BOTONES FÍSICOS
