@@ -17,9 +17,25 @@ SEDE_ACTUAL = "A"
 # =========================================================================
 # VALIDADORES NATIVOS Y FUNCIONES LÓGICAS DE SOPORTE
 # =========================================================================
+
 def validar_solo_numeros(char):
     """Permite únicamente el ingreso de dígitos numéricos en los Entry."""
     return char.isdigit() or char == ""
+
+def validar_monto_decimal(texto_entrante):
+    """Permite solo números y un solo punto o coma decimal para montos en Bs."""
+    if texto_entrante == "": 
+        return True
+    # Si intentan meter espacios vacíos, se rechaza
+    if " " in texto_entrante: 
+        return False
+    # Reemplazamos coma por punto internamente para validar la conversión a número
+    p_norm = texto_entrante.replace(",", ".")
+    try:
+        float(p_norm)
+        return True
+    except ValueError:
+        return False
 
 def validar_mascara_cedula(cedula_texto):
     """Filtro Estricto de Cédulas (RegEx)"""
@@ -41,6 +57,8 @@ def validar_monto_tasa(texto_entrante):
         return True
     except ValueError:
         return False
+
+
 
 def formatear_moneda_ve(monto):
     """Conversor de Moneda al Formato de Venezuela (1.250,00 Bs)"""
@@ -88,14 +106,14 @@ def generar_siguiente_contrato():
 # =========================================================================
 
 def mostrar_dashboard():
+    # 1. Crear la ventana principal
     ventana = ctk.CTk()
-    
     ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL})")
     ventana.geometry("1150x850")
     # Registrar la regla de validación en la ventana activa
-    v_numeros = ventana.register(validar_solo_numeros)
+    v_numeros_puro = ventana.register(validar_solo_numeros)
     v_letras = ventana.register(validar_solo_letras)
-    v_tasa_num = ventana.register(validar_monto_tasa)
+    v_monto_decimal = ventana.register(validar_monto_decimal)
     
     style = ttk.Style()
     style.theme_use("clam")
@@ -266,6 +284,7 @@ def mostrar_dashboard():
     lbl_up_detalles = ctk.CTkLabel(frame_ultimo_pago, text="Historial de Cobros: Sin registrar búsquedas.", font=("Arial", 12, "italic"))
     lbl_up_detalles.pack(pady=5, padx=10, anchor="w")
 
+    
     # -------------------------------------------------------------------------
     # FRAME DE COBRO ACTUALIZADO CON MONTO BS Y DATOS BANCARIOS
     # -------------------------------------------------------------------------
@@ -274,7 +293,14 @@ def mostrar_dashboard():
     
     # --- FILA 0: Tasa, Forma de Pago, Monto en Bs y Etiqueta de Cálculo ---
     ctk.CTkLabel(frame_cobro, text="Tasa Oficial BCV (Bs.):", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=10, sticky="w")
-    txt_tasa = ctk.CTkEntry(frame_cobro, width=130, placeholder_text="0.00", state="disabled", validate="key", validatecommand=(v_tasa_num, '%P'))
+    txt_tasa = ctk.CTkEntry(
+        frame_cobro, 
+        width=130, 
+        placeholder_text="0.00", 
+        state="normal", # 👈 Habilitado para escritura
+        validate="key", 
+        validatecommand=(v_monto_decimal, '%P') # 👈 Máscara decimal para Tasa
+    )
     txt_tasa.grid(row=1, column=0, padx=10, pady=5, sticky="w")
     
     # Función para controlar la activación de campos bancarios
@@ -298,12 +324,18 @@ def mostrar_dashboard():
         frame_cobro, 
         values=["Efectivo USD", "Efectivo Bs", "Transferencia", "Pago Móvil", "Tarjeta de debito"], 
         width=160,
-        command=alternar_campos_bancarios_cobro # <-- Llama a la función al cambiar selección
+        command=alternar_campos_bancarios_cobro
     )
     combo_forma_pago.grid(row=1, column=1, padx=10, pady=5, sticky="w")
     
     ctk.CTkLabel(frame_cobro, text="Monto Cobrado (Bs.):", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
-    txt_monto_bs = ctk.CTkEntry(frame_cobro, width=140, placeholder_text="0.00")
+    txt_monto_bs = ctk.CTkEntry(
+        frame_cobro, 
+        width=140, 
+        placeholder_text="0.00",
+        validate="key",
+        validatecommand=(v_monto_decimal, '%P') # 👈 Máscara decimal para Monto Cobrado
+    )
     txt_monto_bs.grid(row=1, column=2, padx=10, pady=5, sticky="w")
     
     # Etiqueta plana sin borde para el cálculo
@@ -329,12 +361,81 @@ def mostrar_dashboard():
         placeholder_text="Ref. Numérica", 
         state="disabled",
         validate="key", 
-        validatecommand=(v_numeros, '%P')  # Usamos %P para validar el texto final completo
+        validatecommand=(v_numeros_puro, '%P') # 👈 Máscara de solo números
     )
     txt_num_referencia.grid(row=3, column=2, padx=10, pady=5, sticky="w")
 
-    # Inicializamos el estado inicial de la forma de pago por defecto ("Efectivo USD")
+    # -------------------------------------------------------------------------
+    # 1. FUNCIÓN DE ACCIÓN: PROCESAR PAGO (SE COLOCA ARRIBA DEL BOTÓN)
+    # -------------------------------------------------------------------------
+    def ejecutar_pago():
+        """Registra el pago de la cuota en la base de datos de manera segura."""
+        
+        # Obtener la cédula de la variable global O directamente de la casilla de la Pestaña 3
+        cedula_actual = cedula_titular_edicion[0] or txt_busqueda_ced_pagos.get().strip().upper()
+
+        # Validar que tengamos una cédula válida
+        if not cedula_actual:
+            messagebox.showwarning("Atención", "Debe buscar y seleccionar un cliente antes de procesar el pago.")
+            return
+
+        # Actualizamos la variable global por seguridad
+        cedula_titular_edicion[0] = cedula_actual
+
+        # Capturar y limpiar variables del formulario
+        metodo = combo_forma_pago.get()
+        b_origen = txt_banco_origen.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        b_destino = txt_banco_destino.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        num_op = txt_num_referencia.get().strip() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        
+        # Validar campos bancarios en caso de pago electrónico
+        if metodo in ["Transferencia", "Pago Móvil"] and (not b_origen or not b_destino or not num_op):
+            messagebox.showwarning("Faltan Datos", "Para Transferencias y Pago Móvil debe ingresar Banco Pagador, Banco Receptor y N° Operación.")
+            return
+
+        # Capturar montos
+        monto_bs_str = txt_monto_bs.get().strip()
+        tasa_str = txt_tasa.get().strip()
+
+        if not monto_bs_str or float(monto_bs_str.replace(',', '.')) <= 0:
+            messagebox.showwarning("Atención", "Ingrese un monto válido a cobrar.")
+            return
+
+        # --- Lógica de guardado en la Base de Datos (INSERT INTO pagos...) ---
+        # (Aquí continúa tu lógica de conexión SQLite e inserción a la tabla)
+
+    # -------------------------------------------------------------------------
+    # 2. CREACIÓN DEL BOTÓN (AHORA SÍ RECONOCE A ejecutar_pago)
+    # -------------------------------------------------------------------------
+    btn_procesar_pago = ctk.CTkButton(
+        frame_cobro, 
+        text="Procesar Pago", 
+        command=ejecutar_pago,
+        fg_color="#1f538d",
+        font=("Arial", 12, "bold")
+    )
+    btn_procesar_pago.grid(row=3, column=3, padx=10, pady=5)
+
+    # Inicializamos el estado inicial de la forma de pago por defecto
     alternar_campos_bancarios_cobro(combo_forma_pago.get())
+
+    # -------------------------------------------------------------------------
+    # 3. NAVEGACIÓN CON TECLA ENTER (SE DECLARA AL FINAL)
+    # -------------------------------------------------------------------------
+    vincular_salto_enter(txt_tasa, combo_forma_pago)
+    vincular_salto_enter(combo_forma_pago, txt_monto_bs)
+    
+    def saltar_desde_monto(_):
+        if combo_forma_pago.get() in ["Transferencia", "Pago Móvil"]:
+            txt_banco_origen.focus()
+        else:
+            btn_procesar_pago.focus()
+        return "break"
+
+    txt_monto_bs.bind("<Return>", saltar_desde_monto)
+    vincular_salto_enter(txt_banco_origen, txt_banco_destino)
+    vincular_salto_enter(txt_banco_destino, txt_num_referencia)
+    vincular_salto_enter(txt_num_referencia, btn_procesar_pago)
 
     # =========================================================================
     # FUNCIONES GENERALES DE ACCIÓN AUTOMÁTICA
@@ -570,31 +671,39 @@ def mostrar_dashboard():
             cargar_datos_edicion()
             refrescar_tabla_familiares(cedula_titular_edicion[0])
 
-    # Esta es la función de acción que se ejecuta al presionar el botón "Registrar Pago"
-    def ejecutar_pago():
-        """Registra el pago de la cuota en la base de datos de manera segura."""
-        
-        # Obtener la cédula de la variable global O directamente del campo de búsqueda si estuviera vacía
-        cedula_actual = cedula_titular_edicion[0] or txt_busqueda_ced.get().strip().upper()
+    
 
-        # Validar que tengamos una cédula válida
-        if not cedula_actual:
-            messagebox.showwarning("Atención", "Debe buscar y seleccionar un cliente antes de procesar el pago.")
+        # -------------------------------------------------------------------------
+        # VALIDACIÓN DE COINCIDENCIA DE MONTOS
+        # -------------------------------------------------------------------------
+        try:
+            monto_ingresado = float(txt_monto_bs.get().strip().replace(",", "."))
+        except ValueError:
+            messagebox.showwarning("Monto Inválido", "Por favor, ingrese un monto cobrado válido.")
+            txt_monto_bs.focus()
             return
 
-        # Actualizamos la variable global por seguridad
-        cedula_titular_edicion[0] = cedula_actual
-
-        # 2. Capturar y limpiar variables del formulario
-        metodo = combo_forma_pago.get()
-        b_origen = txt_banco_origen.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
-        b_destino = txt_banco_destino.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
-        num_op = txt_num_referencia.get().strip() if metodo in ["Transferencia", "Pago Móvil"] else ""
+        # Extraer el valor numérico de la etiqueta lbl_calculo_bs (Ejemplo texto: "Monto a pagar: 1.500,00 Bs")
+        texto_label = lbl_calculo_bs.cget("text")
+        import re
+        coincidencias = re.findall(r"[\d\.\,]+", texto_label)
         
-        # Validar campos bancarios en caso de pago electrónico
-        if metodo in ["Transferencia", "Pago Móvil"] and (not b_origen or not b_destino or not num_op):
-            messagebox.showwarning("Faltan Datos", "Para Transferencias y Pago Móvil debe ingresar Banco Pagador, Banco Receptor y N° Operación.")
-            return
+        if coincidencias:
+            # Limpiamos el formato para convertir a flotante (1.500,00 -> 1500.00)
+            monto_esperado_str = coincidencias[0].replace(".", "").replace(",", ".")
+            try:
+                monto_esperado = float(monto_esperado_str)
+                
+                # Tolerancia de centavos por redondeos
+                if abs(monto_ingresado - monto_esperado) > 0.01:
+                    messagebox.showerror(
+                        "Diferencia de Montos", 
+                        f"⚠️ El monto ingresado (Bs. {monto_ingresado:,.2f}) NO coincide con el monto a pagar calculado (Bs. {monto_esperado:,.2f}).\n\nPor favor verifique antes de procesar el pago."
+                    )
+                    txt_monto_bs.focus()
+                    return
+            except ValueError:
+                pass
 
         # 3. Validar el número de recibo asignado
         recibo_a_guardar = proximo_recibo_global[0]
@@ -735,8 +844,8 @@ def mostrar_dashboard():
     frame_acciones_p = ctk.CTkFrame(tab_pagos, fg_color="transparent")
     frame_acciones_p.pack(pady=15, padx=20, fill="x")
     
-    btn_pagar = ctk.CTkButton(frame_acciones_p, text="Procesar Pago", fg_color="green", state="disabled", command=ejecutar_pago)
-    btn_pagar.grid(row=0, column=0, padx=5)
+    #btn_pagar = ctk.CTkButton(frame_acciones_p, text="Procesar Pago", fg_color="green", state="disabled", command=ejecutar_pago)
+    #btn_pagar.grid(row=0, column=0, padx=5)
     
     ctk.CTkButton(frame_acciones_p, text="Salir", fg_color="#d35400", command=ventana.destroy).grid(row=0, column=1, padx=20)
 
