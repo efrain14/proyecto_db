@@ -108,6 +108,66 @@ def inicializar_base_de_datos():
     except sqlite3.OperationalError: pass
 
 
+# =========================================================================
+# database/db.py (Añadir al final del archivo)
+# =========================================================================
+
+def obtener_estado_cuenta_titular(criterio_busqueda):
+    """
+    Calcula las métricas financieras acumuladas para un contrato específico.
+    """
+    conn = conectar()
+    cursor = conn.cursor()
+    
+    # 1. Obtener datos básicos del contrato
+    cursor.execute("""
+        SELECT t.cedula, t.nombres, t.apellidos, t.contrato_nuevo, t.contrato_viejo, 
+               t.fecha_ingreso, t.tipo_plan, t.precio_total_usd, t.cuotas_totales
+        FROM titulares t
+        WHERE t.cedula = ? OR t.contrato_nuevo = ? OR t.contrato_viejo = ?
+    """, (criterio_busqueda, criterio_busqueda, criterio_busqueda))
+    
+    titular = cursor.fetchone()
+    if not titular:
+        conn.close()
+        return None
+
+    cedula, nombres, apellidos, c_nuevo, c_viejo, f_ingreso, plan, precio_total, cuotas_totales = titular
+
+    # 2. Consultar historial de pagos realizados
+    cursor.execute("""
+        SELECT num_recibo, fecha_pago, monto_bs, monto_usd, forma_pago, num_operacion
+        FROM pagos
+        WHERE titular_cedula = ?
+        ORDER BY fecha_pago ASC
+    """, (cedula,))
+    
+    pagos = cursor.fetchall()
+    conn.close()
+
+    # 3. Cálculos de Estado de Cuenta
+    recibos_pagados = len(pagos)
+    total_pagado_bs = sum(p[2] for p in pagos)
+    total_pagado_usd = sum(p[3] for p in pagos)
+    
+    recibos_pendientes = max(0, cuotas_totales - recibos_pagados)
+    saldo_pendiente_usd = max(0.0, precio_total - total_pagado_usd)
+    
+    return {
+        "cedula": cedula,
+        "cliente": f"{nombres} {apellidos}",
+        "contrato_nuevo": c_nuevo,
+        "contrato_viejo": c_viejo,
+        "fecha_inicio": f_ingreso,
+        "plan": plan,
+        "recibos_pagados": recibos_pagados,
+        "recibos_pendientes": recibos_pendientes,
+        "total_pagado_bs": total_pagado_bs,
+        "total_pagado_usd": total_pagado_usd,
+        "saldo_pendiente_usd": saldo_pendiente_usd,
+        "historial_pagos": pagos
+    }
+
 
     conn.commit()
     conn.close()

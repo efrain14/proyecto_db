@@ -9,6 +9,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.conexion import conectar
 from logic.consultas import consultar_estado_cliente
+from gui.preview_recibo import abrir_previsualizacion_recibo
 
 # Variable global de control operativo para la sucursal
 SEDE_ACTUAL = "A" 
@@ -108,6 +109,7 @@ def mostrar_dashboard():
     tab_clientes = pestanas.add("Registro de Clientes")
     tab_edicion = pestanas.add("Edición de Titulares y Afiliados")
     tab_pagos = pestanas.add("Control de Pagos y Estado")
+    tab_reportes = pestanas.add("Reportes y Estados de Cuenta")
     
     cedula_titular_edicion = [""]
     proximo_recibo_global = [1]
@@ -428,7 +430,7 @@ def mostrar_dashboard():
         cursor.execute("""
             SELECT cedula, telefono, correo, direccion, nombres, apellidos, fecha_inicio FROM titulares 
             WHERE cedula = ? OR UPPER(contrato_viejo) = ? OR UPPER(contrato_nuevo) = ?
-               OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
+            OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
         """, (crit, crit, crit, crit))
         res = cursor.fetchone()
         
@@ -463,7 +465,7 @@ def mostrar_dashboard():
         cursor.execute("""
             SELECT nombres, apellidos, contrato_viejo, contrato_nuevo, recibos_previos, tipo_contrato, cedula FROM titulares 
             WHERE cedula=? OR UPPER(contrato_viejo)=? OR UPPER(contrato_nuevo)=?
-               OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
+            OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
         """, (ced, ced, ced, ced))
         res = cursor.fetchone()
         
@@ -568,7 +570,7 @@ def mostrar_dashboard():
             cargar_datos_edicion()
             refrescar_tabla_familiares(cedula_titular_edicion[0])
 
-    #Esta es la función de acción que se ejecuta al presionar el botón "Registrar Pago"
+    # Esta es la función de acción que se ejecuta al presionar el botón "Registrar Pago"
     def ejecutar_pago():
         """Registra el pago de la cuota en la base de datos de manera segura."""
         
@@ -605,6 +607,11 @@ def mostrar_dashboard():
             conn = conectar()
             cursor = conn.cursor()
             
+            # Captura de valores ingresados
+            monto_bs_val = float(txt_monto_bs.get().strip() or 0.0)
+            tasa_val = float(txt_tasa.get().strip() or 1.0)
+            monto_usd_val = round(monto_bs_val / tasa_val, 2) if tasa_val > 0 else 0.0
+
             # Guardar el cobro pasando explícitamente el num_recibo
             cursor.execute("""
                 INSERT INTO pagos (
@@ -613,10 +620,10 @@ def mostrar_dashboard():
                 ) VALUES (?, ?, DATE('now'), ?, ?, ?, ?, ?, ?, ?)
             """, (
                 recibo_a_guardar,
-                cedula_titular_edicion[0],
-                txt_monto_bs.get().strip(), # o el monto USD de la cuota según tu lógica
-                txt_monto_bs.get().strip(),
-                txt_tasa.get().strip(),
+                cedula_actual,
+                monto_usd_val,
+                monto_bs_val,
+                tasa_val,
                 metodo,
                 b_origen,
                 b_destino,
@@ -625,7 +632,30 @@ def mostrar_dashboard():
             
             conn.commit()
             messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
-            
+        
+            # =========================================================================
+            # 🚀 AQUÍ SE AGREGA EL CÓDIGO DEL RECIBO (ANTES DE LIMPIAR CAMPOS)
+            # =========================================================================
+            datos_recibo = {
+                "num_recibo": recibo_a_guardar,
+                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "cedula": cedula_actual,
+                "nombre_titular": lbl_nombre_clie.cget("text").replace("Cliente: ", ""),
+                "num_contrato": lbl_cn_display.cget("text").replace("Contrato Sistema: ", ""),
+                "sede": "SEDE PRINCIPAL",  # O la variable de tu sede actual
+                "forma_pago": metodo,
+                "monto_bs": monto_bs_val,
+                "monto_usd": monto_usd_val,
+                "tasa_bcv": tasa_val,
+                "banco_origen": b_origen if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
+                "banco_destino": b_destino if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
+                "num_operacion": num_op if metodo in ["Pago Móvil", "Transferencia"] else "N/A"
+            }
+
+            # Llamada a la ventana emergente de previsualización e impresión
+            abrir_previsualizacion_recibo(ventana, datos_recibo)
+            # =========================================================================
+
             # Limpiar entradas de cobro
             txt_monto_bs.delete(0, "end")
             txt_banco_origen.delete(0, "end")
@@ -644,7 +674,7 @@ def mostrar_dashboard():
             if conn:
                 conn.close() # <-- Libera la BD de forma segura
 
-   # =========================================================================
+    # =========================================================================
     # ENLACES DIRECTOS Y BOTONES FÍSICOS
     # =========================================================================
     
