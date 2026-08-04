@@ -364,48 +364,129 @@ def mostrar_dashboard():
         validatecommand=(v_numeros_puro, '%P') # 👈 Máscara de solo números
     )
     txt_num_referencia.grid(row=3, column=2, padx=10, pady=5, sticky="w")
-
-    # -------------------------------------------------------------------------
-    # 1. FUNCIÓN DE ACCIÓN: PROCESAR PAGO (SE COLOCA ARRIBA DEL BOTÓN)
-    # -------------------------------------------------------------------------
+    
     def ejecutar_pago():
-        """Registra el pago de la cuota en la base de datos de manera segura."""
+        # Detectar la cédula del titular
+        cedula_actual = cedula_titular_edicion[0] or txt_busqueda_ced.get().strip().upper()
         
-        # Obtener la cédula de la variable global O directamente de la casilla de la Pestaña 3
-        cedula_actual = cedula_titular_edicion[0] or txt_busqueda_ced_pagos.get().strip().upper()
-
-        # Validar que tengamos una cédula válida
-        if not cedula_actual:
-            messagebox.showwarning("Atención", "Debe buscar y seleccionar un cliente antes de procesar el pago.")
-            return
-
-        # Actualizamos la variable global por seguridad
-        cedula_titular_edicion[0] = cedula_actual
-
-        # Capturar y limpiar variables del formulario
-        metodo = combo_forma_pago.get()
+        # Capturar datos del formulario
+        metodo = combo_forma_pago.get() if 'combo_forma_pago' in locals() else "Efectivo"
         b_origen = txt_banco_origen.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
         b_destino = txt_banco_destino.get().strip().upper() if metodo in ["Transferencia", "Pago Móvil"] else ""
         num_op = txt_num_referencia.get().strip() if metodo in ["Transferencia", "Pago Móvil"] else ""
         
+        # -------------------------------------------------------------------------
+        # VALIDACIÓN DE COINCIDENCIA DE MONTOS
+        # -------------------------------------------------------------------------
+        try:
+            monto_raw = txt_monto_bs.get().strip().replace(".", "").replace(",", ".")
+            monto_ingresado = float(monto_raw)
+        except ValueError:
+            messagebox.showwarning("Monto Inválido", "Por favor, ingrese un monto cobrado válido.")
+            txt_monto_bs.focus()
+            return
+
+        # Extraer el valor en Bs. que está DESPUÉS de los dos puntos (:)
+        texto_label = lbl_calculo_bs.cget("text")
+        
+        try:
+            if ":" in texto_label:
+                parte_monto = texto_label.split(":")[1]
+                coincidencias = re.findall(r"[\d\.\,]+", parte_monto)
+                if coincidencias:
+                    monto_esperado_str = coincidencias[0].replace(".", "").replace(",", ".")
+                    monto_esperado = float(monto_esperado_str)
+                    
+                    if abs(monto_ingresado - monto_esperado) > 0.05:
+                        messagebox.showerror(
+                            "Diferencia de Montos", 
+                            f"⚠️ El monto ingresado (Bs. {monto_ingresado:,.2f}) NO coincide con el monto a pagar calculado (Bs. {monto_esperado:,.2f}).\n\nPor favor verifique antes de procesar el pago."
+                        )
+                        txt_monto_bs.focus()
+                        return
+        except (ValueError, IndexError) as err:
+            print(f"Aviso en validación de etiqueta: {err}")
+
         # Validar campos bancarios en caso de pago electrónico
         if metodo in ["Transferencia", "Pago Móvil"] and (not b_origen or not b_destino or not num_op):
             messagebox.showwarning("Faltan Datos", "Para Transferencias y Pago Móvil debe ingresar Banco Pagador, Banco Receptor y N° Operación.")
             return
 
-        # Capturar montos
-        monto_bs_str = txt_monto_bs.get().strip()
-        tasa_str = txt_tasa.get().strip()
-
-        if not monto_bs_str or float(monto_bs_str.replace(',', '.')) <= 0:
-            messagebox.showwarning("Atención", "Ingrese un monto válido a cobrar.")
+        # Validar el número de recibo asignado
+        recibo_a_guardar = proximo_recibo_global[0]
+        if not recibo_a_guardar:
+            messagebox.showerror("Error de Recibo", "No se detectó un número de recibo válido asignado.")
             return
 
-        # --- Lógica de guardado en la Base de Datos (INSERT INTO pagos...) ---
-        # (Aquí continúa tu lógica de conexión SQLite e inserción a la tabla)
+        conn = None
+        try:
+            conn = conectar()
+            cursor = conn.cursor()
+            
+            # Captura de valores ingresados
+            monto_bs_val = float(txt_monto_bs.get().strip().replace(".", "").replace(",", ".") or 0.0)
+            tasa_val = float(txt_tasa.get().strip().replace(".", "").replace(",", ".") or 1.0)
+            monto_usd_val = round(monto_bs_val / tasa_val, 2) if tasa_val > 0 else 0.0
+
+            cursor.execute("""
+                INSERT INTO pagos (
+                    num_recibo, titular_cedula, fecha_pago, monto_usd, monto_bs, 
+                    tasa_bcv, forma_pago, banco_origen, banco_destino, num_operacion
+                ) VALUES (?, ?, DATE('now'), ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                recibo_a_guardar,
+                cedula_actual,
+                monto_usd_val,
+                monto_bs_val,
+                tasa_val,
+                metodo,
+                b_origen,
+                b_destino,
+                num_op
+            ))
+            
+            conn.commit()
+            messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
+
+            # Datos para el recibo
+            datos_recibo = {
+                "num_recibo": recibo_a_guardar,
+                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "cedula": cedula_actual,
+                "nombre_titular": lbl_nombre_clie.cget("text").replace("Cliente: ", ""),
+                "num_contrato": lbl_cn_display.cget("text").replace("Contrato Sistema: ", ""),
+                "sede": "SEDE PRINCIPAL",
+                "forma_pago": metodo,
+                "monto_bs": monto_bs_val,
+                "monto_usd": monto_usd_val,
+                "tasa_bcv": tasa_val,
+                "banco_origen": b_origen if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
+                "banco_destino": b_destino if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
+                "num_operacion": num_op if metodo in ["Pago Móvil", "Transferencia"] else "N/A"
+            }
+
+            abrir_previsualizacion_recibo(ventana, datos_recibo)
+
+            # Limpiar entradas de cobro
+            txt_monto_bs.delete(0, "end")
+            txt_banco_origen.delete(0, "end")
+            txt_banco_destino.delete(0, "end")
+            txt_num_referencia.delete(0, "end")
+                    
+            # Refrescar la pantalla
+            buscar_y_calcular_pagos()
+                    
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            messagebox.showerror("Fallo al registrar el cobro", f"Detalle: {e}")
+                    
+        finally:
+            if conn:
+                conn.close()
 
     # -------------------------------------------------------------------------
-    # 2. CREACIÓN DEL BOTÓN (AHORA SÍ RECONOCE A ejecutar_pago)
+    # 2. CREACIÓN DEL BOTÓN
     # -------------------------------------------------------------------------
     btn_procesar_pago = ctk.CTkButton(
         frame_cobro, 
@@ -416,11 +497,10 @@ def mostrar_dashboard():
     )
     btn_procesar_pago.grid(row=3, column=3, padx=10, pady=5)
 
-    # Inicializamos el estado inicial de la forma de pago por defecto
     alternar_campos_bancarios_cobro(combo_forma_pago.get())
 
     # -------------------------------------------------------------------------
-    # 3. NAVEGACIÓN CON TECLA ENTER (SE DECLARA AL FINAL)
+    # 3. NAVEGACIÓN CON TECLA ENTER
     # -------------------------------------------------------------------------
     vincular_salto_enter(txt_tasa, combo_forma_pago)
     vincular_salto_enter(combo_forma_pago, txt_monto_bs)
@@ -436,7 +516,6 @@ def mostrar_dashboard():
     vincular_salto_enter(txt_banco_origen, txt_banco_destino)
     vincular_salto_enter(txt_banco_destino, txt_num_referencia)
     vincular_salto_enter(txt_num_referencia, btn_procesar_pago)
-
     # =========================================================================
     # FUNCIONES GENERALES DE ACCIÓN AUTOMÁTICA
     # =========================================================================
@@ -610,12 +689,12 @@ def mostrar_dashboard():
             u = cursor.fetchone()
             lbl_up_detalles.configure(text=f"Último Pago -> Fecha: {u[0]} | Monto: ${u[1]:.2f} USD | Recibo: #{u[2]} | Método: {u[3]}" if u else "Historial: Sin cobros procesados en el sistema.")
             
-            btn_pagar.configure(state="normal")
+            btn_procesar_pago.configure(state="normal")
             txt_tasa.focus()
         else:
             messagebox.showerror("No Encontrado", "No se localizó ningún contrato asociado al dato ingresado.")
             txt_tasa.configure(state="disabled")
-            btn_pagar.configure(state="disabled")
+            btn_procesar_pago.configure(state="disabled")
         conn.close()
 
     def actualizar_calculo_bolivares(*args):
@@ -670,118 +749,6 @@ def mostrar_dashboard():
             messagebox.showinfo("Éxito", "Familiar retirado.")
             cargar_datos_edicion()
             refrescar_tabla_familiares(cedula_titular_edicion[0])
-
-    
-
-        # -------------------------------------------------------------------------
-        # VALIDACIÓN DE COINCIDENCIA DE MONTOS
-        # -------------------------------------------------------------------------
-        try:
-            monto_ingresado = float(txt_monto_bs.get().strip().replace(",", "."))
-        except ValueError:
-            messagebox.showwarning("Monto Inválido", "Por favor, ingrese un monto cobrado válido.")
-            txt_monto_bs.focus()
-            return
-
-        # Extraer el valor numérico de la etiqueta lbl_calculo_bs (Ejemplo texto: "Monto a pagar: 1.500,00 Bs")
-        texto_label = lbl_calculo_bs.cget("text")
-        import re
-        coincidencias = re.findall(r"[\d\.\,]+", texto_label)
-        
-        if coincidencias:
-            # Limpiamos el formato para convertir a flotante (1.500,00 -> 1500.00)
-            monto_esperado_str = coincidencias[0].replace(".", "").replace(",", ".")
-            try:
-                monto_esperado = float(monto_esperado_str)
-                
-                # Tolerancia de centavos por redondeos
-                if abs(monto_ingresado - monto_esperado) > 0.01:
-                    messagebox.showerror(
-                        "Diferencia de Montos", 
-                        f"⚠️ El monto ingresado (Bs. {monto_ingresado:,.2f}) NO coincide con el monto a pagar calculado (Bs. {monto_esperado:,.2f}).\n\nPor favor verifique antes de procesar el pago."
-                    )
-                    txt_monto_bs.focus()
-                    return
-            except ValueError:
-                pass
-
-        # 3. Validar el número de recibo asignado
-        recibo_a_guardar = proximo_recibo_global[0]
-        if not recibo_a_guardar:
-            messagebox.showerror("Error de Recibo", "No se detectó un número de recibo válido asignado.")
-            return
-
-        conn = None
-        try:
-            conn = conectar()
-            cursor = conn.cursor()
-            
-            # Captura de valores ingresados
-            monto_bs_val = float(txt_monto_bs.get().strip() or 0.0)
-            tasa_val = float(txt_tasa.get().strip() or 1.0)
-            monto_usd_val = round(monto_bs_val / tasa_val, 2) if tasa_val > 0 else 0.0
-
-            # Guardar el cobro pasando explícitamente el num_recibo
-            cursor.execute("""
-                INSERT INTO pagos (
-                    num_recibo, titular_cedula, fecha_pago, monto_usd, monto_bs, 
-                    tasa_bcv, forma_pago, banco_origen, banco_destino, num_operacion
-                ) VALUES (?, ?, DATE('now'), ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                recibo_a_guardar,
-                cedula_actual,
-                monto_usd_val,
-                monto_bs_val,
-                tasa_val,
-                metodo,
-                b_origen,
-                b_destino,
-                num_op
-            ))
-            
-            conn.commit()
-            messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
-        
-            # =========================================================================
-            # 🚀 AQUÍ SE AGREGA EL CÓDIGO DEL RECIBO (ANTES DE LIMPIAR CAMPOS)
-            # =========================================================================
-            datos_recibo = {
-                "num_recibo": recibo_a_guardar,
-                "fecha": datetime.now().strftime("%Y-%m-%d"),
-                "cedula": cedula_actual,
-                "nombre_titular": lbl_nombre_clie.cget("text").replace("Cliente: ", ""),
-                "num_contrato": lbl_cn_display.cget("text").replace("Contrato Sistema: ", ""),
-                "sede": "SEDE PRINCIPAL",  # O la variable de tu sede actual
-                "forma_pago": metodo,
-                "monto_bs": monto_bs_val,
-                "monto_usd": monto_usd_val,
-                "tasa_bcv": tasa_val,
-                "banco_origen": b_origen if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
-                "banco_destino": b_destino if metodo in ["Pago Móvil", "Transferencia"] else "N/A",
-                "num_operacion": num_op if metodo in ["Pago Móvil", "Transferencia"] else "N/A"
-            }
-
-            # Llamada a la ventana emergente de previsualización e impresión
-            abrir_previsualizacion_recibo(ventana, datos_recibo)
-            # =========================================================================
-
-            # Limpiar entradas de cobro
-            txt_monto_bs.delete(0, "end")
-            txt_banco_origen.delete(0, "end")
-            txt_banco_destino.delete(0, "end")
-            txt_num_referencia.delete(0, "end")
-            
-            # Refrescar la pantalla de pagos para actualizar cuotas retenidas/pendientes
-            buscar_y_calcular_pagos()
-            
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            messagebox.showerror("Fallo al registrar el cobro", f"Detalle: {e}")
-            
-        finally:
-            if conn:
-                conn.close() # <-- Libera la BD de forma segura
 
     # =========================================================================
     # ENLACES DIRECTOS Y BOTONES FÍSICOS
@@ -844,8 +811,7 @@ def mostrar_dashboard():
     frame_acciones_p = ctk.CTkFrame(tab_pagos, fg_color="transparent")
     frame_acciones_p.pack(pady=15, padx=20, fill="x")
     
-    #btn_pagar = ctk.CTkButton(frame_acciones_p, text="Procesar Pago", fg_color="green", state="disabled", command=ejecutar_pago)
-    #btn_pagar.grid(row=0, column=0, padx=5)
+    
     
     ctk.CTkButton(frame_acciones_p, text="Salir", fg_color="#d35400", command=ventana.destroy).grid(row=0, column=1, padx=20)
 
@@ -868,7 +834,7 @@ def mostrar_dashboard():
         lbl_aviso_morosidad.configure(text="ESTADO: --", text_color="grey")
         lbl_up_detalles.configure(text="Historial de Cobros: Sin registrar búsquedas.")
         lbl_calculo_bs.configure(text="Monto a pagar: 0,00 Bs")
-        btn_pagar.configure(state="disabled")
+        btn_procesar_pago.configure(state="disabled")
 
     pestanas.configure(command=gestionar_limpieza_pestanas)
     ventana.mainloop()
