@@ -446,6 +446,48 @@ def mostrar_dashboard():
             ))
             
             conn.commit()
+
+            # -------------------------------------------------------------------------
+            # LÓGICA DE RENOVACIÓN AUTOMÁTICA DE PLANES
+            # -------------------------------------------------------------------------
+            cursor.execute("SELECT COUNT(*) FROM pagos WHERE titular_cedula = ?", (cedula_actual,))
+            total_pagos_sistema = cursor.fetchone()[0]
+
+            cursor.execute("SELECT recibos_previos, tipo_contrato FROM titulares WHERE cedula = ?", (cedula_actual,))
+            res_titular = cursor.fetchone()
+
+            if res_titular:
+                recibos_previos = res_titular[0] or 0
+                plan_actual = res_titular[1] or ""
+                total_cuotas_acumuladas = recibos_previos + total_pagos_sistema
+
+                # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
+                if "24 meses" in plan_actual.lower() and total_cuotas_acumuladas == 24:
+                    nuevo_plan = "RENOVACION ANUAL 12 MESES"
+                    cursor.execute("""
+                        UPDATE titulares 
+                        SET tipo_contrato = ? 
+                        WHERE cedula = ?
+                    """, (nuevo_plan, cedula_actual))
+                    conn.commit()
+
+                    precio_nuevo = "$20.00" if "entierro" in plan_actual.lower() else "$10.00"
+                    messagebox.showinfo(
+                        "¡Contrato Renovado!", 
+                        f"🎉 El titular ha completado la cuota N° 24.\n\n"
+                        f"Su contrato se ha renovado automáticamente al plan:\n"
+                        f"• {nuevo_plan}\n"
+                        f"• Cuota mensual asignada: {precio_nuevo}"
+                    )
+
+                # CASO 2: Plan RENOVACION ANUAL 12 MESES completando un ciclo de 12 cuotas (36, 48, etc.)
+                elif "renovacion anual" in plan_actual.lower() and total_cuotas_acumuladas > 24 and ((total_cuotas_acumuladas - 24) % 12 == 0):
+                    messagebox.showinfo(
+                        "¡Renovación Anual Completada!", 
+                        f"🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
+                        f"El contrato continuará activo para el siguiente período de 12 meses."
+                    )
+
             messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
 
             # Datos para el recibo
