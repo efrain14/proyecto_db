@@ -1,0 +1,15 @@
+Plaintext
+# Archivos compilados y caché de Python
+__pycache__/
+*.pyc
+
+# Base de datos local
+*.db
+funeraria.db
+
+# Archivos temporales y reportes
+*.pdf
+recibo_temp.pdf
+
+# Configuración del editor
+.vscode/

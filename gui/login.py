@@ -25,7 +25,7 @@ def validar_login(txt_usuario, txt_contrasena, ventana_login, al_conectar_exito)
     
     if usuario_encontrado:
         ventana_login.destroy()
-        al_conectar_exito()
+        al_conectar_exito(usuario)
     else:
         messagebox.showerror("Error de Acceso", "Usuario o contraseña incorrectos.")
 

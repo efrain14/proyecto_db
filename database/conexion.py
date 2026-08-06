@@ -71,6 +71,14 @@ def inicializar_base_de_datos():
         cursor.execute("INSERT INTO usuarios (usuario, contrasena) VALUES (?, ?)", ("admin", "admin123"))
         print("Usuario por defecto creado: admin / admin123")
 
+    # Migración de columna rol para control de acceso
+    try:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT DEFAULT 'operador';")
+    except sqlite3.OperationalError: pass
+    
+    cursor.execute("UPDATE usuarios SET rol = 'admin' WHERE usuario = 'admin';")
+    conn.commit()
+
     # =========================================================================
     # MIGRACIONES Y ACTUALIZACIONES DE COLUMNAS
     # =========================================================================

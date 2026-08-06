@@ -1,15 +1,17 @@
 import customtkinter as ctk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 from datetime import datetime
 import re  # Módulo para validaciones de expresiones regulares (máscaras estrictas)
 import sys
 import os
+import shutil
 
 # Asegurar que Python localice la carpeta raíz del proyecto para las importaciones
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.conexion import conectar
 from logic.consultas import consultar_estado_cliente
 from gui.preview_recibo import abrir_previsualizacion_recibo
+from gui.reportes_gui import renderizar_grafico_cobranza
 
 # Variable global de control operativo para la sucursal
 SEDE_ACTUAL = "A" 
@@ -105,10 +107,19 @@ def generar_siguiente_contrato():
 # INTERFAZ GRÁFICA PRINCIPAL (DASHBOARD)
 # =========================================================================
 
-def mostrar_dashboard():
+def mostrar_dashboard(usuario_actual="admin"):
+    # Consultar el rol del usuario autenticado
+    conn_u = conectar()
+    cursor_u = conn_u.cursor()
+    cursor_u.execute("SELECT rol FROM usuarios WHERE usuario = ?", (usuario_actual,))
+    res_u = cursor_u.fetchone()
+    conn_u.close()
+    rol_usuario = (res_u[0] if res_u and res_u[0] else "operador").lower()
+    es_admin = (rol_usuario == "admin" or usuario_actual == "admin")
+
     # 1. Crear la ventana principal
     ventana = ctk.CTk()
-    ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL})")
+    ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
     ventana.geometry("1150x850")
     # Registrar la regla de validación en la ventana activa
     v_numeros_puro = ventana.register(validar_solo_numeros)
@@ -128,6 +139,8 @@ def mostrar_dashboard():
     tab_edicion = pestanas.add("Edición de Titulares y Afiliados")
     tab_pagos = pestanas.add("Control de Pagos y Estado")
     tab_reportes = pestanas.add("Reportes y Estados de Cuenta")
+    if es_admin:
+        tab_config = pestanas.add("Configuración")
     
     cedula_titular_edicion = [""]
     proximo_recibo_global = [1]
@@ -386,26 +399,23 @@ def mostrar_dashboard():
             txt_monto_bs.focus()
             return
 
-        # Extraer el valor en Bs. que está DESPUÉS de los dos puntos (:)
-        texto_label = lbl_calculo_bs.cget("text")
-        
+        # Calcular monto esperado directamente según tasa y plan
         try:
-            if ":" in texto_label:
-                parte_monto = texto_label.split(":")[1]
-                coincidencias = re.findall(r"[\d\.\,]+", parte_monto)
-                if coincidencias:
-                    monto_esperado_str = coincidencias[0].replace(".", "").replace(",", ".")
-                    monto_esperado = float(monto_esperado_str)
-                    
-                    if abs(monto_ingresado - monto_esperado) > 0.05:
-                        messagebox.showerror(
-                            "Diferencia de Montos", 
-                            f"⚠️ El monto ingresado (Bs. {monto_ingresado:,.2f}) NO coincide con el monto a pagar calculado (Bs. {monto_esperado:,.2f}).\n\nPor favor verifique antes de procesar el pago."
-                        )
-                        txt_monto_bs.focus()
-                        return
+            tasa_val_num = float(txt_tasa.get().strip().replace(".", "").replace(",", ".") or 0.0)
+            if tasa_val_num > 0:
+                tc_norm = tipo_contrato_global[0].lower()
+                usd_plan = 12.0 if ("renovación" in tc_norm or "renovacion" in tc_norm) else (20.0 if "entierro" in tc_norm else 10.0)
+                monto_esperado = usd_plan * tasa_val_num
+                
+                if abs(monto_ingresado - monto_esperado) > 0.05:
+                    messagebox.showerror(
+                        "Diferencia de Montos", 
+                        f"⚠️ El monto ingresado (Bs. {monto_ingresado:,.2f}) NO coincide con el monto a pagar calculado ({usd_plan:.2f} USD = Bs. {monto_esperado:,.2f}).\n\nPor favor verifique antes de procesar el pago."
+                    )
+                    txt_monto_bs.focus()
+                    return
         except (ValueError, IndexError) as err:
-            print(f"Aviso en validación de etiqueta: {err}")
+            print(f"Aviso en validación de monto: {err}")
 
         # Validar campos bancarios en caso de pago electrónico
         if metodo in ["Transferencia", "Pago Móvil"] and (not b_origen or not b_destino or not num_op):
@@ -491,11 +501,24 @@ def mostrar_dashboard():
             messagebox.showinfo("Éxito", f"Pago registrado exitosamente con Recibo N° {recibo_a_guardar}")
 
             # Datos para el recibo
+            cursor.execute("SELECT nombres, apellidos FROM titulares WHERE cedula = ?", (cedula_actual,))
+            tit_datos = cursor.fetchone()
+            nombre_cliente_limpio = f"{tit_datos[0]} {tit_datos[1]}".upper() if tit_datos else cedula_actual
+
+            if "24 meses" in plan_actual.lower() or "ppa" in plan_actual.lower():
+                cuotas_rest = max(0, 24 - total_cuotas_acumuladas)
+                cuota_str = f"Cuota #{total_cuotas_acumuladas} de 24 (Canceladas: {total_cuotas_acumuladas}/24 | Restantes: {cuotas_rest})"
+            else:
+                cuotas_en_ren = ((total_cuotas_acumuladas - 24) % 12) or 12
+                cuotas_rest = max(0, 12 - cuotas_en_ren)
+                cuota_str = f"Ciclo Renovación -> Cuota #{cuotas_en_ren} de 12 (Canceladas: {cuotas_en_ren}/12 | Restantes: {cuotas_rest})"
+
             datos_recibo = {
                 "num_recibo": recibo_a_guardar,
-                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "fecha": datetime.now().strftime("%d/%m/%Y"),
                 "cedula": cedula_actual,
-                "nombre_titular": lbl_nombre_clie.cget("text").replace("Cliente: ", ""),
+                "nombre_titular": nombre_cliente_limpio,
+                "cuota_info": cuota_str,
                 "num_contrato": lbl_cn_display.cget("text").replace("Contrato Sistema: ", ""),
                 "sede": "SEDE PRINCIPAL",
                 "forma_pago": metodo,
@@ -724,10 +747,12 @@ def mostrar_dashboard():
             estado = consultar_estado_cliente(cedula_real)
             if estado["moroso"]:
                 lbl_aviso_morosidad.configure(text=f"ESTADO: MOROSO (Debe ${estado['deuda_usd']:.2f})", text_color="red")
+            elif estado["deuda_usd"] > 0:
+                lbl_aviso_morosidad.configure(text=f"ESTADO: AL DÍA / SOLVENTE (Pendiente Cuota #{proximo_recibo_global[0]} de {cuotas_totales_plan})", text_color="#f39c12")
             else:
-                lbl_aviso_morosidad.configure(text="ESTADO: AL DÍA / SOLVENTE", text_color="green")
+                lbl_aviso_morosidad.configure(text="ESTADO: AL DÍA / SOLVENTE (Sin cuotas pendientes)", text_color="#2ecc71")
             
-            cursor.execute("SELECT fecha_pago, monto_usd, numero_recibo, forma_pago FROM pagos WHERE titular_cedula = ? ORDER BY id DESC LIMIT 1", (cedula_real,))
+            cursor.execute("SELECT fecha_pago, monto_usd, num_recibo, forma_pago FROM pagos WHERE titular_cedula = ? ORDER BY id DESC LIMIT 1", (cedula_real,))
             u = cursor.fetchone()
             lbl_up_detalles.configure(text=f"Último Pago -> Fecha: {u[0]} | Monto: ${u[1]:.2f} USD | Recibo: #{u[2]} | Método: {u[3]}" if u else "Historial: Sin cobros procesados en el sistema.")
             
@@ -858,6 +883,226 @@ def mostrar_dashboard():
     ctk.CTkButton(frame_acciones_p, text="Salir", fg_color="#d35400", command=ventana.destroy).grid(row=0, column=1, padx=20)
 
     # =========================================================================
+    # PESTAÑA 4: REPORTES Y ESTADOS DE CUENTA
+    # =========================================================================
+    lbl_titulo_rep = ctk.CTkLabel(tab_reportes, text="📊 Resumen Estadístico de Cobranzas", font=("Arial", 16, "bold"))
+    lbl_titulo_rep.pack(pady=(10, 5), padx=20, anchor="w")
+
+    frame_grafico = ctk.CTkFrame(tab_reportes, fg_color="#2b2b2b")
+    frame_grafico.pack(pady=10, padx=20, fill="both", expand=True)
+
+    def cargar_reporte_cobros():
+        for widget in frame_grafico.winfo_children():
+            widget.destroy()
+            
+        conn = conectar()
+        cursor = conn.cursor()
+        cursor.execute("SELECT strftime('%m/%Y', fecha_pago) as mes, SUM(monto_usd) FROM pagos GROUP BY mes ORDER BY fecha_pago ASC LIMIT 6")
+        filas = cursor.fetchall()
+        conn.close()
+
+        datos_meses = {}
+        if filas:
+            for mes, monto in filas:
+                datos_meses[mes or "S/F"] = monto or 0.0
+        else:
+            datos_meses = {"Ene": 0, "Feb": 0, "Mar": 0}
+
+        try:
+            renderizar_grafico_cobranza(frame_grafico, datos_meses)
+        except Exception as ex:
+            ctk.CTkLabel(frame_grafico, text=f"No se pudo cargar el gráfico: {ex}", font=("Arial", 12)).pack(pady=20)
+
+    # =========================================================================
+    # PESTAÑA 5: CONFIGURACIÓN (Solo Administradores)
+    # =========================================================================
+    if es_admin:
+        lbl_titulo_conf = ctk.CTkLabel(tab_config, text="⚙️ Panel de Configuración y Seguridad (Administrador)", font=("Arial", 16, "bold"))
+        lbl_titulo_conf.pack(pady=(10, 5), padx=20, anchor="w")
+
+        frame_grid_conf = ctk.CTkFrame(tab_config, fg_color="transparent")
+        frame_grid_conf.pack(pady=10, padx=10, fill="both", expand=True)
+
+        # ---------------------------------------------------------------------
+        # SECCIÓN 1: RESPALDO DE BASE DE DATOS A USB / CARPETA
+        # ---------------------------------------------------------------------
+        frame_respaldo = ctk.CTkFrame(frame_grid_conf, border_width=2, border_color="#1f538d")
+        frame_respaldo.pack(pady=10, padx=10, fill="x")
+
+        ctk.CTkLabel(frame_respaldo, text="📦 Respaldo de Seguridad de Base de Datos", font=("Arial", 14, "bold"), text_color="#3498db").pack(pady=(10, 2), padx=15, anchor="w")
+        ctk.CTkLabel(frame_respaldo, text="Haga clic en el botón para copiar y exportar la base de datos (.db) a un Pendrive USB o carpeta externa.", font=("Arial", 11)).pack(pady=(0, 10), padx=15, anchor="w")
+
+        def ejecutar_respaldo():
+            fecha_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_defecto = f"respaldo_funeraria_{fecha_str}.db"
+            
+            destino = filedialog.asksaveasfilename(
+                title="Guardar Respaldo de Base de Datos",
+                initialfile=nombre_defecto,
+                defaultextension=".db",
+                filetypes=[("Base de Datos SQLite", "*.db"), ("Todos los archivos", "*.*")]
+            )
+            
+            if destino:
+                try:
+                    ruta_origen = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'funeraria.db'))
+                    shutil.copy2(ruta_origen, destino)
+                    messagebox.showinfo("Respaldo Éxitoso", f"🎉 Copia de seguridad guardada exitosamente en:\n\n{destino}")
+                except Exception as ex:
+                    messagebox.showerror("Error de Respaldo", f"No se pudo copiar la base de datos:\n{ex}")
+
+        btn_respaldo = ctk.CTkButton(frame_respaldo, text="💾 Exportar Copia de Respaldo a USB / Disco", fg_color="#27ae60", font=("Arial", 12, "bold"), height=35, command=ejecutar_respaldo)
+        btn_respaldo.pack(pady=(0, 15), padx=15, anchor="w")
+
+        # ---------------------------------------------------------------------
+        # SECCIÓN 2: GESTIÓN DE USUARIOS Y CLAVES
+        # ---------------------------------------------------------------------
+        frame_usuarios = ctk.CTkFrame(frame_grid_conf)
+        frame_usuarios.pack(pady=10, padx=10, fill="both", expand=True)
+
+        ctk.CTkLabel(frame_usuarios, text="👥 Gestión de Usuarios y Claves de Acceso", font=("Arial", 14, "bold"), text_color="#f1c40f").pack(pady=(10, 5), padx=15, anchor="w")
+
+        frame_form_u = ctk.CTkFrame(frame_usuarios, fg_color="transparent")
+        frame_form_u.pack(pady=5, padx=15, fill="x")
+
+        ctk.CTkLabel(frame_form_u, text="Nuevo Usuario:", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=5, sticky="w")
+        txt_u_user = ctk.CTkEntry(frame_form_u, width=130, placeholder_text="Ej: operador1")
+        txt_u_user.grid(row=1, column=0, padx=5, pady=5)
+
+        ctk.CTkLabel(frame_form_u, text="Contraseña:", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=5, sticky="w")
+        txt_u_pass = ctk.CTkEntry(frame_form_u, width=130, placeholder_text="Clave de acceso", show="*")
+        txt_u_pass.grid(row=1, column=1, padx=5, pady=5)
+
+        ctk.CTkLabel(frame_form_u, text="Confirmar Clave:", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=5, sticky="w")
+        txt_u_pass2 = ctk.CTkEntry(frame_form_u, width=130, placeholder_text="Repetir clave", show="*")
+        txt_u_pass2.grid(row=1, column=2, padx=5, pady=5)
+
+        ctk.CTkLabel(frame_form_u, text="Rol de Acceso:", font=("Arial", 11, "bold")).grid(row=0, column=3, padx=5, sticky="w")
+        combo_u_rol = ctk.CTkComboBox(frame_form_u, values=["operador", "admin"], width=120)
+        combo_u_rol.grid(row=1, column=3, padx=5, pady=5)
+
+        def refrescar_tabla_usuarios():
+            for item in tabla_u.get_children(): tabla_u.delete(item)
+            conn = conectar()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, usuario, COALESCE(rol, 'operador') FROM usuarios ORDER BY id ASC")
+            for u_row in cursor.fetchall():
+                tabla_u.insert("", "end", values=(u_row[0], u_row[1], u_row[2].upper()))
+            conn.close()
+
+        def crear_usuario():
+            u_name = txt_u_user.get().strip().lower()
+            u_clave = txt_u_pass.get().strip()
+            u_clave2 = txt_u_pass2.get().strip()
+            u_role = combo_u_rol.get().lower()
+
+            if not u_name or not u_clave or not u_clave2:
+                messagebox.showwarning("Campos Requeridos", "Debe completar todos los campos: usuario, contraseña y la confirmación.")
+                return
+
+            if u_clave != u_clave2:
+                messagebox.showerror("Error de Coincidencia", "⚠️ Las contraseñas ingresadas NO coinciden. Por favor verifique.")
+                txt_u_pass2.focus()
+                return
+
+            try:
+                conn = conectar()
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO usuarios (usuario, contrasena, rol) VALUES (?, ?, ?)", (u_name, u_clave, u_role))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("Éxito", f"Usuario '{u_name}' registrado correctamente como {u_role.upper()}.")
+                txt_u_user.delete(0, "end")
+                txt_u_pass.delete(0, "end")
+                txt_u_pass2.delete(0, "end")
+                refrescar_tabla_usuarios()
+            except Exception as ex:
+                messagebox.showerror("Error al Crear Usuario", f"No se pudo crear el usuario. Posiblemente ya existe.\n{ex}")
+
+        btn_add_u = ctk.CTkButton(frame_form_u, text="➕ Agregar Usuario", fg_color="#1f538d", command=crear_usuario)
+        btn_add_u.grid(row=1, column=4, padx=15, pady=5)
+
+        # Tabla de Usuarios registrados
+        tabla_u_frame = ctk.CTkFrame(frame_usuarios)
+        tabla_u_frame.pack(pady=10, padx=15, fill="both", expand=True)
+
+        tabla_u = ttk.Treeview(tabla_u_frame, columns=("id", "usuario", "rol"), show="headings", height=5)
+        for c, t, w in [("id", "ID", 60), ("usuario", "Nombre de Usuario", 250), ("rol", "Rol de Acceso", 150)]:
+            tabla_u.heading(c, text=t); tabla_u.column(c, width=w, anchor="center")
+        tabla_u.pack(fill="both", expand=True)
+
+        frame_u_acciones = ctk.CTkFrame(frame_usuarios, fg_color="transparent")
+        frame_u_acciones.pack(pady=(5, 10), padx=15, fill="x")
+
+        def cambiar_clave_usuario():
+            sel = tabla_u.selection()
+            if not sel:
+                messagebox.showwarning("Selección Requerida", "Seleccione un usuario de la tabla para cambiar su contraseña.")
+                return
+            u_id, u_name, _ = tabla_u.item(sel)['values']
+
+            top_pass = ctk.CTkToplevel(ventana)
+            top_pass.title(f"Cambiar Contraseña - {u_name}")
+            top_pass.geometry("380x250")
+            top_pass.grab_set()
+
+            ctk.CTkLabel(top_pass, text=f"🔒 Nueva Clave para '{u_name}':", font=("Arial", 12, "bold")).pack(pady=(15, 2), padx=20, anchor="w")
+            txt_p1 = ctk.CTkEntry(top_pass, width=280, show="*")
+            txt_p1.pack(pady=2, padx=20)
+
+            ctk.CTkLabel(top_pass, text="Confirmar Nueva Clave:", font=("Arial", 12, "bold")).pack(pady=(10, 2), padx=20, anchor="w")
+            txt_p2 = ctk.CTkEntry(top_pass, width=280, show="*")
+            txt_p2.pack(pady=2, padx=20)
+            txt_p1.focus_set()
+
+            def guardar_nueva_clave():
+                p1 = txt_p1.get().strip()
+                p2 = txt_p2.get().strip()
+                if not p1 or not p2:
+                    messagebox.showwarning("Campos Vacíos", "Debe llenar ambos campos de contraseña.", parent=top_pass)
+                    return
+                if p1 != p2:
+                    messagebox.showerror("Error de Coincidencia", "⚠️ Las contraseñas ingresadas NO coinciden.", parent=top_pass)
+                    txt_p2.focus()
+                    return
+                
+                conn = conectar()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE usuarios SET contrasena = ? WHERE id = ?", (p1, u_id))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("Éxito", f"Contraseña del usuario '{u_name}' actualizada correctamente.")
+                top_pass.destroy()
+
+            ctk.CTkButton(top_pass, text="Guardar Nueva Clave", fg_color="green", command=guardar_nueva_clave).pack(pady=15)
+
+        def eliminar_usuario():
+            sel = tabla_u.selection()
+            if not sel:
+                messagebox.showwarning("Selección Requerida", "Seleccione un usuario de la tabla para eliminarlo.")
+                return
+            u_id, u_name, u_rol = tabla_u.item(sel)['values']
+
+            if u_name.lower() == usuario_actual.lower():
+                messagebox.showerror("Acción Bloqueada", "No puede eliminar la cuenta activa con la que ha iniciado sesión actualmente.")
+                return
+
+            if messagebox.askyesno("Confirmar Eliminación", f"¿Está seguro de eliminar de forma definitiva al usuario '{u_name}'?"):
+                conn = conectar()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM usuarios WHERE id = ?", (u_id,))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("Éxito", f"Usuario '{u_name}' eliminado.")
+                refrescar_tabla_usuarios()
+
+        ctk.CTkButton(frame_u_acciones, text="🔑 Cambiar Contraseña", fg_color="#e67e22", command=cambiar_clave_usuario).pack(side="left", padx=5)
+        ctk.CTkButton(frame_u_acciones, text="❌ Eliminar Usuario", fg_color="#c0392b", command=eliminar_usuario).pack(side="left", padx=5)
+        ctk.CTkButton(frame_u_acciones, text="Salir del Sistema", fg_color="#d35400", command=ventana.destroy).pack(side="right", padx=5)
+
+        refrescar_tabla_usuarios()
+
+    # =========================================================================
     # MOTOR DE LIMPIEZA INTER-PESTAÑAS
     # =========================================================================
     def gestionar_limpieza_pestanas():
@@ -942,8 +1187,12 @@ def abrir_modulo_familiares(ventana_padre, cedula_titular, v_let, funcion_exito_
             messagebox.showwarning("Campos Vacíos", "Todos los campos son obligatorios.")
             return
             
-        if len(ffec) != 10:
-            messagebox.showwarning("Fecha Inválida", "La fecha debe cumplir el patrón DD/MM/YYYY.")
+        try:
+            if len(ffec) != 10:
+                raise ValueError
+            datetime.strptime(ffec, "%d/%m/%Y")
+        except ValueError:
+            messagebox.showwarning("Fecha Inválida", "La fecha de nacimiento debe tener un formato válido DD/MM/YYYY (Ej: 15/05/1990).")
             return
 
         if fced != "MENOR":

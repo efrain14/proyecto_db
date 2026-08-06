@@ -19,9 +19,11 @@ def abrir_previsualizacion_recibo(parent_window, datos_pago):
     frame_info = ctk.CTkFrame(top)
     frame_info.pack(pady=10, padx=20, fill="x")
     
-    ctk.CTkLabel(frame_info, text=f"Recibo N°: {datos_pago['num_recibo']}", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=2)
+    ctk.CTkLabel(frame_info, text=f"Recibo N°: #{datos_pago['num_recibo']}", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=2)
     ctk.CTkLabel(frame_info, text=f"Cliente: {datos_pago['nombre_titular']}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
-    ctk.CTkLabel(frame_info, text=f"Monto Pagado: Bs. {datos_pago['monto_bs']:.2f} (${datos_pago['monto_usd']:.2f})", font=("Arial", 12, "bold"), text_color="#f1c40f").pack(anchor="w", padx=10, pady=2)
+    if datos_pago.get('cuota_info'):
+        ctk.CTkLabel(frame_info, text=f"Detalle: {datos_pago['cuota_info']}", font=("Arial", 11, "italic"), text_color="#3498db").pack(anchor="w", padx=10, pady=2)
+    ctk.CTkLabel(frame_info, text=f"Monto Pagado: Bs. {datos_pago['monto_bs']:,.2f} (${datos_pago['monto_usd']:.2f})", font=("Arial", 12, "bold"), text_color="#f1c40f").pack(anchor="w", padx=10, pady=2)
     ctk.CTkLabel(frame_info, text=f"Método: {datos_pago['forma_pago']}", font=("Arial", 12)).pack(anchor="w", padx=10, pady=2)
 
     def imprimir_pdf():

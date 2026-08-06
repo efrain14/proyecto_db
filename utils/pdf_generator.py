@@ -25,9 +25,9 @@ def generar_recibo_pdf(datos_pago, ruta_salida="recibo_temp.pdf"):
         bloque.append(Paragraph(f"<b>SISTEMA FUNERARIO - RECIBO DE PAGO</b> [{etiqueta_copia}]", styles['Heading2']))
         
         info_header = [
-            [f"N° Recibo: {datos_pago['num_recibo']}", f"Fecha: {datos_pago['fecha']}"],
+            [f"N° Recibo: #{datos_pago['num_recibo']}", f"Fecha: {datos_pago['fecha']}"],
             [f"Titular: {datos_pago['nombre_titular']}", f"Cédula: {datos_pago['cedula']}"],
-            [f"Contrato N°: {datos_pago['num_contrato']}", f"Sede: {datos_pago['sede']}"]
+            [f"Contrato N°: {datos_pago['num_contrato']}", f"Detalle: {datos_pago.get('cuota_info', 'N/A')}"]
         ]
         t_header = Table(info_header, colWidths=[270, 270])
         t_header.setStyle(TableStyle([
@@ -41,12 +41,12 @@ def generar_recibo_pdf(datos_pago, ruta_salida="recibo_temp.pdf"):
 
         # Detalle del Cobro
         detalle = [
-            ["Forma de Pago", "Monto Cobrado (Bs.)", "Tasa BCV", "Monto Eq. (USD)"],
+            ["Tipo de Pago", "Monto Pagado (Bs.)", "Tasa BCV", "Monto (USD)"],
             [
                 datos_pago['forma_pago'],
-                f"Bs. {datos_pago['monto_bs']:.2f}",
-                f"Bs. {datos_pago['tasa_bcv']:.2f}",
-                f"$ {datos_pago['monto_usd']:.2f}"
+                f"Bs. {datos_pago['monto_bs']:,.2f}",
+                f"Bs. {datos_pago['tasa_bcv']:,.2f}",
+                f"$ {datos_pago['monto_usd']:,.2f}"
             ]
         ]
         
@@ -61,10 +61,17 @@ def generar_recibo_pdf(datos_pago, ruta_salida="recibo_temp.pdf"):
 
         t_detalle = Table(detalle, colWidths=[135, 135, 135, 135])
         t_detalle.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('HEADERBACKGROUND', (0,0), (-1,0), colors.HexColor("#1f538d")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#7f8c8d")),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1f538d")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 9),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+            ('BACKGROUND', (0,1), (-1,1), colors.HexColor("#f9f9f9")),
+            ('TEXTCOLOR', (0,1), (-1,-1), colors.black),
         ]))
         bloque.append(t_detalle)
         bloque.append(Spacer(1, 20))

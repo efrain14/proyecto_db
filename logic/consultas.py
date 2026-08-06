@@ -8,65 +8,87 @@ from database.conexion import conectar
 
 def obtener_meses_transcurridos(fecha_inicio_str):
     """Calcula cuántos meses han pasado desde la fecha de inicio hasta hoy."""
-    # CAMBIO AQUÍ: Ahora convertimos usando el formato Latinoamericano DD-MM-YYYY
-    fecha_inicio = datetime.strptime(fecha_inicio_str, "%d/%m/%Y")
+    try:
+        fecha_inicio = datetime.strptime(fecha_inicio_str, "%d/%m/%Y")
+    except Exception:
+        return 1
+        
     fecha_hoy = datetime.now()
-    
-    # Fórmula matemática para calcular la diferencia en meses exactos
     meses = (fecha_hoy.year - fecha_inicio.year) * 12 + (fecha_hoy.month - fecha_inicio.month)
     
-    # Si el contrato empezó hoy o este mes, contamos al menos 1 mes (el mes en curso)
     if meses <= 0:
         return 1
     
-    # Si ya pasó el día del mes de cobro, sumamos el mes en curso
-    if fecha_hoy.day >= fecha_inicio.day:
+    # Solo incrementamos el mes exigible si ya pasó el día del mes de cobro
+    if fecha_hoy.day > fecha_inicio.day:
         return meses + 1
     
     return meses
 
 def consultar_estado_cliente(cedula_titular):
     """
-    Calcula la deuda actual en dólares del cliente y determina si está moroso.
-    Devuelve un diccionario con los datos del estado.
+    Calcula la deuda actual en dólares del cliente contemplando recibos previos e historial.
+    Determina morosidad considerando el vencimiento mensual de 30 días.
     """
     conn = conectar()
     cursor = conn.cursor()
     
-    # 1. Obtener los datos del contrato del titular
-    cursor.execute("SELECT tipo_contrato, fecha_inicio FROM titulares WHERE cedula = ?", (cedula_titular,))
+    cursor.execute("""
+        SELECT tipo_contrato, fecha_inicio, recibos_previos 
+        FROM titulares 
+        WHERE cedula = ?
+    """, (cedula_titular,))
     titular = cursor.fetchone()
     
     if not titular:
         conn.close()
         return {"error": "Cliente no encontrado"}
     
-    tipo_contrato, fecha_inicio_str = titular
-    # Asignamos el precio según el tipo de contrato
-    costo_mensual = 10.0 if tipo_contrato == "velacion" else 20.0
+    tipo_contrato, fecha_inicio_str, r_previos = titular
+    recibos_previos = r_previos or 0
     
-    # 2. Calcular cuántos meses debe llevar pagados hasta hoy
-    meses_totales = obtener_meses_transcurridos(fecha_inicio_str)
-    total_a_pagar_usd = meses_totales * costo_mensual
+    tipo_lower = (tipo_contrato or "").lower()
+    if "entierro" in tipo_lower:
+        costo_mensual = 20.0
+    elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
+        costo_mensual = 12.0
+    else:
+        costo_mensual = 10.0
     
-    # 3. Sumar todos los pagos que ya ha hecho el cliente en dólares
-    cursor.execute("SELECT SUM(monto_usd) FROM pagos WHERE titular_cedula = ?", (cedula_titular,))
-    resultado_pagos = cursor.fetchone()[0]
-    total_pagado_usd = resultado_pagos if resultado_pagos is not None else 0.0
+    # Calcular meses exigibles por tiempo transcurrido
+    meses_totales = obtener_meses_transcurridos(fecha_inicio_str or datetime.now().strftime("%d/%m/%Y"))
     
-    # 4. Calcular la deuda
-    deuda_usd = total_a_pagar_usd - total_pagado_usd
+    # Limitar cuotas exigibles del plan si es PPA 24 meses
+    if "24 meses" in tipo_lower:
+        cuotas_exigibles = min(24, meses_totales)
+    else:
+        cuotas_exigibles = meses_totales
+        
+    # Obtener historial de pagos en sistema
+    cursor.execute("""
+        SELECT COUNT(*), SUM(monto_usd) 
+        FROM pagos 
+        WHERE titular_cedula = ?
+    """, (cedula_titular,))
+    res_pagos = cursor.fetchone()
+    pagos_cnt = res_pagos[0] or 0
+    pagos_sum = res_pagos[1] or 0.0
+    
+    total_cuotas_pagadas = recibos_previos + pagos_cnt
+    total_pagado_usd = (recibos_previos * costo_mensual) + pagos_sum
+    
+    cuotas_debitables = max(0, cuotas_exigibles - total_cuotas_pagadas)
+    deuda_usd = cuotas_debitables * costo_mensual
     
     conn.close()
     
-    if deuda_usd < 0:
-        deuda_usd = 0.0
-        
-    es_moroso = deuda_usd > 0
+    # Es moroso solo si debe MÁS de 1 cuota vencida (pasaron más de 30 días sin pagar la cuota anterior)
+    es_moroso = cuotas_debitables > 1
     
     return {
-        "meses_transcurridos": meses_totales,
-        "total_debido_usd": total_a_pagar_usd,
+        "meses_transcurridos": cuotas_exigibles,
+        "cuotas_pagadas": total_cuotas_pagadas,
+        "total_debido_usd": cuotas_exigibles * costo_mensual,
         "total_pagado_usd": total_pagado_usd,
         "deuda_usd": deuda_usd,
         "moroso": es_moroso
