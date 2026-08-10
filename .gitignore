@@ -13,3 +13,17 @@ recibo_temp.pdf
 
 # Configuración del editor
 .vscode/
+
+# Compilados de Python
+**/__pycache__/
+*.pyc
+
+# Carpetas de empaquetado (PyInstaller)
+build/
+dist/
+*.spec
+
+# Entornos virtuales (por si usas uno en el futuro)
+.venv/
+venv/
+env/

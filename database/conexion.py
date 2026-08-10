@@ -1,8 +1,18 @@
 import sqlite3
 import os
+import sys
+
+def obtener_ruta_base():
+    """ Determina la ruta raíz real del proyecto ejecutable o en desarrollo """
+    if hasattr(sys, '_MEIPASS'):
+        # Si corre como ejecutable empaquetado, usa el directorio temporal de PyInstaller
+        return sys._MEIPASS
+    # Si corre en VS Code, usa la carpeta real del proyecto
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 def conectar():
-    ruta_db = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'funeraria.db'))
+    # Coloca la base de datos en la raíz del entorno de ejecución
+    ruta_db = os.path.join(obtener_ruta_base(), 'funeraria.db')
     conn = sqlite3.connect(ruta_db)
     return conn
 
