@@ -140,7 +140,7 @@ def obtener_estado_cuenta_titular(criterio_busqueda):
     # 1. Obtener datos básicos del contrato
     cursor.execute("""
         SELECT t.cedula, t.nombres, t.apellidos, t.contrato_nuevo, t.contrato_viejo, 
-               t.fecha_ingreso, t.tipo_plan, t.precio_total_usd, t.cuotas_totales
+        t.fecha_ingreso, t.tipo_plan, t.precio_total_usd, t.cuotas_totales
         FROM titulares t
         WHERE t.cedula = ? OR t.contrato_nuevo = ? OR t.contrato_viejo = ?
     """, (criterio_busqueda, criterio_busqueda, criterio_busqueda))

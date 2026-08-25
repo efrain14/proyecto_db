@@ -27,3 +27,7 @@ dist/
 .venv/
 venv/
 env/
+
+respaldos/
+funeraria_pre_migracion_*.db
+respaldo_funeraria_*.db

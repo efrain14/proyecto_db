@@ -69,6 +69,36 @@ def validar_monto_tasa(texto_entrante):
     except ValueError:
         return False
 
+def validar_fecha_teclado(texto_entrante):
+    """
+    Permite escribir solamente una fecha con formato DD/MM/YYYY.
+    Bloquea letras, espacios y caracteres inválidos.
+    """
+    if texto_entrante == "":
+        return True
+
+    if len(texto_entrante) > 10:
+        return False
+
+    patron = r"^\d{0,2}(/\d{0,2}(/\d{0,4})?)?$"
+    return bool(re.match(patron, texto_entrante))
+
+
+def validar_fecha_ddmmyyyy(fecha_texto):
+    """
+    Valida que la fecha sea realmente válida y tenga formato DD/MM/YYYY.
+    """
+    if not fecha_texto:
+        return True
+
+    if len(fecha_texto) != 10:
+        return False
+
+    try:
+        datetime.strptime(fecha_texto, "%d/%m/%Y")
+        return True
+    except ValueError:
+        return False
 
 def formatear_moneda_ve(monto):
     """Conversor de Moneda al Formato de Venezuela (1.250,00 Bs)"""
@@ -83,9 +113,9 @@ def convertir_numero(texto):
     """
     Convierte texto numérico a float.
     Soporta:
-      - 1234.56
-      - 1234,56
-      - 1.234,56
+    - 1234.56
+    - 1234,56
+    - 1.234,56
     """
     texto = (texto or "").strip()
 
@@ -266,10 +296,51 @@ def mostrar_dashboard(usuario_actual="admin"):
     ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
     ventana.geometry("1150x850")
 
+    # Ocultar temporalmente la ventana principal mientras se muestra el splash
+    ventana.withdraw()
+
+    # =========================================================================
+    # SPLASH DE CARGA
+    # =========================================================================
+    splash = ctk.CTkToplevel(ventana)
+    splash.title("Cargando sistema")
+    splash.geometry("420x200")
+    splash.resizable(False, False)
+    splash.configure(fg_color="#101010")
+    splash.attributes("-topmost", True)
+    splash.transient(ventana)
+    splash.grab_set()
+
+    # Centrar el splash
+    splash.update_idletasks()
+    x = (splash.winfo_screenwidth() // 2) - (420 // 2)
+    y = (splash.winfo_screenheight() // 2) - (200 // 2)
+    splash.geometry(f"420x200+{x}+{y}")
+
+    ctk.CTkLabel(
+        splash,
+        text="Sistema Funerario",
+        font=("Arial", 18, "bold")
+    ).pack(pady=(25, 5))
+
+    ctk.CTkLabel(
+        splash,
+        text="Cargando panel de control...",
+        font=("Arial", 12)
+    ).pack(pady=(0, 10))
+
+    barra_splash = ctk.CTkProgressBar(splash, width=260)
+    barra_splash.set(0.25)
+    barra_splash.pack(pady=5)
+
+    splash.update_idletasks()
+    splash.update()
+
     # Registrar la regla de validación en la ventana activa
     v_numeros_puro = ventana.register(validar_solo_numeros)
     v_letras = ventana.register(validar_solo_letras)
     v_monto_decimal = ventana.register(validar_monto_decimal)
+    v_fecha = ventana.register(validar_fecha_teclado)
 
     style = ttk.Style()
     style.theme_use("clam")
@@ -303,6 +374,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     cedula_titular_pago = [""]
     proximo_recibo_global = [1]
     tipo_contrato_global = [""]
+    nota_titular_global = [""]
     procesando_pago = [False]
 
     # =========================================================================
@@ -310,7 +382,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # =========================================================================
 
     frame_form_reg = ctk.CTkFrame(tab_clientes, fg_color="transparent")
-    frame_form_reg.grid(row=0, column=0, columnspan=3, pady=10, padx=10, sticky="w")
+    frame_form_reg.grid(row=0, column=0, columnspan=4, pady=10, padx=10, sticky="w")
 
     ctk.CTkLabel(frame_form_reg, text="Cédula Titular (Ej: V12345678):", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=10, sticky="w")
     txt_cedula = ctk.CTkEntry(frame_form_reg, width=150, placeholder_text="V12345678")
@@ -320,7 +392,17 @@ def mostrar_dashboard(usuario_actual="admin"):
     txt_cont_viejo = ctk.CTkEntry(frame_form_reg, width=180, placeholder_text="Opcional")
     txt_cont_viejo.grid(row=1, column=1, padx=10, pady=(2, 10))
 
-    ctk.CTkLabel(frame_form_reg, text="N° Contrato Sistema (Auto):", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
+    # 👇 NUEVO CAMPO: FECHA CONTRATO ANTERIOR 👇
+    ctk.CTkLabel(frame_form_reg, text="Fecha Contrato Anterior:", font=("Arial", 11, "bold")).grid(row=0, column=2, padx=10, sticky="w")
+    txt_fecha_contrato_ant = ctk.CTkEntry(
+        frame_form_reg,
+        width=150,
+        placeholder_text="DD/MM/YYYY",
+        
+    )
+    txt_fecha_contrato_ant.grid(row=1, column=2, padx=10, pady=(2, 10))
+
+    ctk.CTkLabel(frame_form_reg, text="N° Contrato Sistema (Auto):", font=("Arial", 11, "bold")).grid(row=0, column=3, padx=10, sticky="w")
     txt_cont_nuevo = ctk.CTkEntry(
         frame_form_reg,
         width=150,
@@ -330,7 +412,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     )
     txt_cont_nuevo.insert(0, generar_siguiente_contrato())
     txt_cont_nuevo.configure(state="disabled")
-    txt_cont_nuevo.grid(row=1, column=2, padx=10, pady=(2, 10))
+    txt_cont_nuevo.grid(row=1, column=3, padx=10, pady=(2, 10))
 
     ctk.CTkLabel(frame_form_reg, text="Nombres:", font=("Arial", 11, "bold")).grid(row=2, column=0, padx=10, sticky="w")
     txt_nombres = ctk.CTkEntry(frame_form_reg, width=200, validate="key", validatecommand=(v_letras, '%P'))
@@ -387,14 +469,18 @@ def mostrar_dashboard(usuario_actual="admin"):
         values=[
             "PPA velación 24 meses",
             "PPA velación + entierro 24 meses",
-            "renovación anual 12 meses"
+            "renovación anual 12 meses",
+            "renovación anual + entierro 12 meses"
         ],
-        width=230
+        width=280
     )
     combo_contrato.grid(row=7, column=2, padx=10, pady=(2, 10))
 
+    # Navegación con Enter (ahora incluye la fecha del contrato anterior)
     vincular_salto_enter(txt_cedula, txt_cont_viejo)
-    vincular_salto_enter(txt_cont_viejo, txt_nombres)
+    vincular_salto_enter(txt_cont_viejo, txt_fecha_contrato_ant)
+    vincular_salto_enter(txt_fecha_contrato_ant, txt_cont_nuevo)
+    vincular_salto_enter(txt_cont_nuevo, txt_nombres)
     vincular_salto_enter(txt_nombres, txt_apellidos)
     vincular_salto_enter(txt_apellidos, txt_fecha_nac)
     vincular_salto_enter(txt_fecha_nac, txt_telefono)
@@ -403,7 +489,26 @@ def mostrar_dashboard(usuario_actual="admin"):
     vincular_salto_enter(txt_correo, txt_direccion)
 
     tabla_frame = ctk.CTkFrame(tab_clientes)
-    tabla_frame.grid(row=1, column=0, columnspan=3, pady=10, padx=10, sticky="nsew")
+    tabla_frame.grid(row=1, column=0, columnspan=4, pady=10, padx=10, sticky="nsew")
+
+    # -------------------------------------------------------------------------
+    # NOTAS / OBSERVACIONES DEL CONTRATO
+    # -------------------------------------------------------------------------
+    ctk.CTkLabel(
+        tab_clientes,
+        text="Notas / Observaciones del Contrato:",
+        font=("Arial", 11, "bold", "underline"),
+        text_color="#e67e22"
+    ).grid(row=2, column=0, columnspan=3, padx=10, sticky="w")
+
+    txt_notas_registro = ctk.CTkTextbox(
+        tab_clientes,
+        width=800,
+        height=70,
+        font=("Arial", 10),
+        wrap="word"
+    )
+    txt_notas_registro.grid(row=3, column=0, columnspan=3, padx=10, pady=(2, 5), sticky="ew")
 
     tabla = ttk.Treeview(
         tabla_frame,
@@ -449,6 +554,17 @@ def mostrar_dashboard(usuario_actual="admin"):
     )
     lbl_fecha_contrato_ed.grid(row=1, column=2, padx=20)
 
+    lbl_fecha_contrato_ed = ctk.CTkLabel(frame_busq_ed, text="fecha de contrato: --/--/----", font=("Arial", 12, "italic", "bold"), text_color="#3498db")
+    lbl_fecha_contrato_ed.grid(row=1, column=2, padx=20)
+
+    lbl_contrato_nuevo_ed = ctk.CTkLabel(
+        frame_busq_ed,
+        text="Contrato Sistema: --",
+        font=("Arial", 12, "italic", "bold"),
+        text_color="#2ecc71"
+    )
+    lbl_contrato_nuevo_ed.grid(row=2, column=2, padx=20, sticky="w")
+
     frame_campos_ed = ctk.CTkFrame(tab_edicion)
     frame_campos_ed.pack(pady=5, padx=10, fill="x")
 
@@ -465,8 +581,21 @@ def mostrar_dashboard(usuario_actual="admin"):
     txt_ed_tel.grid(row=1, column=2, padx=10, pady=5)
 
     ctk.CTkLabel(frame_campos_ed, text="Modificar Correo:", font=("Arial", 11, "bold")).grid(row=2, column=0, padx=10, sticky="w")
-    txt_ed_corr = ctk.CTkEntry(frame_campos_ed, width=220)
-    txt_ed_corr.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="w")
+    txt_ed_corr = ctk.CTkEntry(frame_campos_ed, width=180)
+    txt_ed_corr.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+    ctk.CTkLabel(frame_campos_ed, text="Contrato Viejo:", font=("Arial", 11, "bold")).grid(row=2, column=1, padx=10, sticky="w")
+    txt_ed_contrato_viejo = ctk.CTkEntry(frame_campos_ed, width=180, placeholder_text="Opcional")
+    txt_ed_contrato_viejo.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
+    ctk.CTkLabel(frame_campos_ed, text="Fecha Contrato Viejo:", font=("Arial", 11, "bold")).grid(row=4, column=1, padx=10, sticky="w")
+    txt_ed_fecha_contrato_viejo = ctk.CTkEntry(
+        frame_campos_ed,
+        width=180,
+        placeholder_text="DD/MM/YYYY",
+        
+    )
+    txt_ed_fecha_contrato_viejo.grid(row=5, column=1, padx=10, pady=5, sticky="w")
 
     ctk.CTkLabel(frame_campos_ed, text="Modificar Dirección de Habitación:", font=("Arial", 11, "bold")).grid(row=2, column=2, padx=10, sticky="w")
     txt_ed_dir = ctk.CTkEntry(frame_campos_ed, width=350)
@@ -475,7 +604,31 @@ def mostrar_dashboard(usuario_actual="admin"):
     vincular_salto_enter(txt_ed_nom, txt_ed_ape)
     vincular_salto_enter(txt_ed_ape, txt_ed_tel)
     vincular_salto_enter(txt_ed_tel, txt_ed_corr)
-    vincular_salto_enter(txt_ed_corr, txt_ed_dir)
+    vincular_salto_enter(txt_ed_corr, txt_ed_contrato_viejo)
+    vincular_salto_enter(txt_ed_contrato_viejo, txt_ed_fecha_contrato_viejo)
+    vincular_salto_enter(txt_ed_fecha_contrato_viejo, txt_ed_dir)
+
+    # -------------------------------------------------------------------------
+    # NOTAS / OBSERVACIONES EN EDICIÓN
+    # -------------------------------------------------------------------------
+    frame_notas_ed = ctk.CTkFrame(tab_edicion)
+    frame_notas_ed.pack(pady=5, padx=10, fill="x")
+
+    ctk.CTkLabel(
+        frame_notas_ed,
+        text="Notas / Observaciones del Contrato:",
+        font=("Arial", 11, "bold", "underline"),
+        text_color="#e67e22"
+    ).pack(anchor="w", padx=10)
+
+    txt_ed_notas = ctk.CTkTextbox(
+        frame_notas_ed,
+        width=700,
+        height=60,
+        font=("Arial", 10),
+        wrap="word"
+    )
+    txt_ed_notas.pack(padx=10, pady=(2, 5), fill="x")
 
     tabla_ed_frame = ctk.CTkFrame(tab_edicion)
     tabla_ed_frame.pack(pady=5, padx=10, fill="both", expand=True)
@@ -545,6 +698,62 @@ def mostrar_dashboard(usuario_actual="admin"):
 
     lbl_up_detalles = ctk.CTkLabel(frame_ultimo_pago, text="Historial de Cobros: Sin registrar búsquedas.", font=("Arial", 12, "italic"))
     lbl_up_detalles.pack(pady=5, padx=10, anchor="w")
+    
+    # -------------------------------------------------------------------------
+    # BOTÓN VER NOTAS DEL TITULAR
+    # -------------------------------------------------------------------------
+    frame_notas_pagos = ctk.CTkFrame(tab_pagos, fg_color="transparent")
+    frame_notas_pagos.pack(pady=2, padx=20, anchor="w")
+
+    def ver_notas_titular():
+        """Abre una ventana emergente con las notas del titular actual."""
+        nota = nota_titular_global[0]
+    
+        top_notas = ctk.CTkToplevel(ventana)
+        top_notas.title("Notas del Titular")
+        top_notas.geometry("500x350")
+        top_notas.grab_set()
+
+        ctk.CTkLabel(
+            top_notas,
+            text="📝 Notas / Observaciones del Contrato",
+            font=("Arial", 14, "bold"),
+            text_color="#8e44ad"
+        ).pack(pady=(15, 5), padx=20, anchor="w")
+
+        txt_ver_notas = ctk.CTkTextbox(
+            top_notas,
+            width=450,
+            height=220,
+            font=("Arial", 10),
+            wrap="word",
+            state="disabled"
+        )
+        txt_ver_notas.pack(padx=20, pady=5, fill="both", expand=True)
+
+        txt_ver_notas.configure(state="normal")
+        if nota:
+            txt_ver_notas.insert("1.0", nota)
+        else:
+            txt_ver_notas.insert("1.0", "No hay notas registradas para este titular.")
+        txt_ver_notas.configure(state="disabled")
+
+        ctk.CTkButton(
+            top_notas,
+            text="Cerrar",
+            fg_color="#7f8c8d",
+            command=top_notas.destroy
+        ).pack(pady=10)
+
+    btn_ver_notas = ctk.CTkButton(
+        frame_notas_pagos,
+        text="📝 Ver Notas del Titular",
+        fg_color="#8e44ad",
+        command=ver_notas_titular,
+        width=180,
+        state="disabled"
+    )
+    btn_ver_notas.pack(side="left")
 
     # -------------------------------------------------------------------------
     # FRAME DE COBRO ACTUALIZADO CON MONTO BS Y DATOS BANCARIOS
@@ -690,7 +899,13 @@ def mostrar_dashboard(usuario_actual="admin"):
             # VALIDACIÓN DE COINCIDENCIA DE MONTOS
             # -------------------------------------------------------------------------
 
-            usd_plan = obtener_monto_usd_plan(tipo_contrato_global[0])
+            plan_monto_txt = (tipo_contrato_global[0] or "").lower()
+
+            # Solo existen cuotas de $10 y $20.
+            # Si el contrato tiene entierro, la cuota es de $20.
+            # Esto incluye al nuevo contrato: renovación anual + entierro 12 meses.
+            usd_plan = 20.0 if "entierro" in plan_monto_txt else 10.0
+
             monto_esperado = usd_plan * tasa_val_num
 
             if abs(monto_ingresado - monto_esperado) > 0.05:
@@ -743,7 +958,35 @@ def mostrar_dashboard(usuario_actual="admin"):
                 pagos_sistema_previos = cursor.fetchone()[0]
 
                 total_cuotas_nuevo = recibos_previos + pagos_sistema_previos + 1
-                cuota_numero = calcular_cuota_numero(plan_actual, total_cuotas_nuevo)
+
+                # Normalizar el nombre del plan para comparar sin acentos
+                plan_norm = plan_actual.lower()
+                plan_norm = (plan_norm.replace("á", "a")
+                                      .replace("é", "e")
+                                      .replace("í", "i")
+                                      .replace("ó", "o")
+                                      .replace("ú", "u")
+                                      .replace("ñ", "n"))
+
+                es_renovacion = "renovacion anual" in plan_norm
+                es_renovacion_despues_ppa = es_renovacion and "velacion" in plan_norm
+
+                # Calcular el número de cuota que se está pagando
+                if "24 meses" in plan_norm:
+                    cuota_numero = min(24, total_cuotas_nuevo)
+
+                elif es_renovacion and not es_renovacion_despues_ppa:
+                    # Renovación independiente, por ejemplo:
+                    # renovación anual 12 meses
+                    # renovación anual + entierro 12 meses
+                    cuota_numero = ((total_cuotas_nuevo - 1) % 12) + 1 if total_cuotas_nuevo > 0 else 1
+
+                elif total_cuotas_nuevo > 24:
+                    # Renovación que viene después de un PPA de 24 meses
+                    cuota_numero = ((total_cuotas_nuevo - 24 - 1) % 12) + 1
+
+                else:
+                    cuota_numero = ((total_cuotas_nuevo - 1) % 12) + 1 if total_cuotas_nuevo > 0 else 1
 
                 # Calcular próximo recibo único
                 recibo_a_guardar = obtener_siguiente_recibo(cursor)
@@ -808,16 +1051,14 @@ def mostrar_dashboard(usuario_actual="admin"):
 
                 conn.commit()
 
-                # -------------------------------------------------------------------------
-                # LÓGICA DE RENOVACIÓN AUTOMÁTICA DE PLANES
-                # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # LÓGICA DE RENOVACIÓN AUTOMÁTICA DE PLANES
+    # -------------------------------------------------------------------------
 
-                # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
-                if "24 meses" in plan_actual.lower() and total_cuotas_nuevo == 24:
+        # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
+                if "24 meses" in plan_norm and total_cuotas_nuevo == 24:
 
-                    plan_actual_lower = plan_actual.lower()
-
-                    if "entierro" in plan_actual_lower:
+                    if "entierro" in plan_norm:
                         nuevo_plan = "RENOVACION ANUAL 12 MESES - VELACION + ENTIERRO"
                         precio_nuevo = "$20.00"
                     else:
@@ -842,13 +1083,41 @@ def mostrar_dashboard(usuario_actual="admin"):
                         f"• Cuota mensual asignada: {precio_nuevo}"
                     )
 
-                # CASO 2: Plan RENOVACION ANUAL 12 MESES completando un ciclo de 12 cuotas
-                elif "renovacion anual" in plan_actual.lower() and total_cuotas_nuevo > 24 and ((total_cuotas_nuevo - 24) % 12 == 0):
-                    messagebox.showinfo(
-                        "¡Renovación Anual Completada!",
-                        f"🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
-                        f"El contrato continuará activo para el siguiente período de 12 meses."
-                    )
+        # CASO 2: Renovación independiente, por ejemplo:
+                # renovación anual 12 meses
+                # renovación anual + entierro 12 meses
+                elif es_renovacion and not es_renovacion_despues_ppa:
+                    if total_cuotas_nuevo > 0 and total_cuotas_nuevo % 12 == 0:
+
+                        if "entierro" in plan_norm:
+                            messagebox.showinfo(
+                                "¡Renovación Anual + Entierro Completada!",
+                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual + Entierro.\n\n"
+                                "El contrato continuará activo para el siguiente período de 12 meses."
+                            )
+                        else:
+                            messagebox.showinfo(
+                                "¡Renovación Anual Completada!",
+                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
+                                "El contrato continuará activo para el siguiente período de 12 meses."
+                            )
+
+        # CASO 3: Renovación que viene después de un PPA de 24 meses
+                elif es_renovacion and es_renovacion_despues_ppa:
+                    if total_cuotas_nuevo > 24 and ((total_cuotas_nuevo - 24) % 12 == 0):
+
+                        if "entierro" in plan_norm:
+                            messagebox.showinfo(
+                                "¡Renovación Anual + Entierro Completada!",
+                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual + Entierro.\n\n"
+                                "El contrato continuará activo para el siguiente período de 12 meses."
+                            )
+                        else:
+                            messagebox.showinfo(
+                                "¡Renovación Anual Completada!",
+                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
+                                "El contrato continuará activo para el siguiente período de 12 meses."
+                            )
 
                 # Datos para el recibo
                 cursor.execute("""
@@ -860,9 +1129,14 @@ def mostrar_dashboard(usuario_actual="admin"):
                 tit_datos = cursor.fetchone()
                 nombre_cliente_limpio = f"{tit_datos[0]} {tit_datos[1]}".upper() if tit_datos else cedula_actual
 
-                if "24 meses" in plan_actual.lower() or "ppa" in plan_actual.lower():
+                if "24 meses" in plan_norm or "ppa" in plan_norm:
                     cuotas_rest = max(0, 24 - cuota_numero)
                     cuota_str = f"Cuota #{cuota_numero} de 24 (Canceladas: {cuota_numero}/24 | Restantes: {cuotas_rest})"
+
+                elif "renovacion anual" in plan_norm and "entierro" in plan_norm:
+                    cuotas_rest = max(0, 12 - cuota_numero)
+                    cuota_str = f"Ciclo Renovación + Entierro -> Cuota #{cuota_numero} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
+
                 else:
                     cuotas_rest = max(0, 12 - cuota_numero)
                     cuota_str = f"Ciclo Renovación -> Cuota #{cuota_numero} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
@@ -874,6 +1148,7 @@ def mostrar_dashboard(usuario_actual="admin"):
                     "nombre_titular": nombre_cliente_limpio,
                     "cuota_info": cuota_str,
                     "num_contrato": lbl_cn_display.cget("text").replace("Contrato Sistema: ", ""),
+                    "tipo_contrato": tipo_contrato_global[0] or plan_actual,
                     "sede": f"SEDE {SEDE_ACTUAL}",
                     "forma_pago": metodo,
                     "monto_bs": monto_bs_val,
@@ -992,6 +1267,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     def guardar_titular():
         ced = txt_cedula.get().strip().upper()
         c_viejo = txt_cont_viejo.get().strip()
+        fecha_c_viejo = txt_fecha_contrato_ant.get().strip()
         c_nuevo = txt_cont_nuevo.get().strip()
         nom = txt_nombres.get().strip().lower()
         ape = txt_apellidos.get().strip().lower()
@@ -1000,12 +1276,22 @@ def mostrar_dashboard(usuario_actual="admin"):
         corr = txt_correo.get().strip().lower()
         dir_hab = txt_direccion.get().strip().lower()
         tipo_c = combo_contrato.get()
+        notas = txt_notas_registro.get("1.0", "end").strip()
         recibos_raw = txt_recibos_previos.get().strip()
 
         try:
             r_previos = int(recibos_raw) if recibos_raw else 0
         except:
             r_previos = 0
+            
+        # CORRECCIÓN 1: Indentación arreglada (4 espacios más adentro)
+        if fecha_c_viejo and not validar_fecha_ddmmyyyy(fecha_c_viejo):
+            messagebox.showwarning(
+                "Fecha Contrato Anterior Inválida",
+                "La fecha del contrato anterior debe tener formato DD/MM/YYYY.\nEjemplo: 15/03/2024"
+            )
+            txt_fecha_contrato_ant.focus()
+            return    
 
         if not validar_mascara_cedula(ced):
             messagebox.showwarning(
@@ -1026,26 +1312,11 @@ def mostrar_dashboard(usuario_actual="admin"):
             conn = conectar()
             cursor = conn.cursor()
 
+            # CORRECCIÓN 2: Indentación del SQL limpia
             cursor.execute("""
-                INSERT INTO titulares (
-                    cedula, contrato_viejo, contrato_nuevo, nombres, apellidos, fecha_nacimiento,
-                    telefono, correo, direccion, tipo_contrato, fecha_inicio, recibos_previos
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                ced,
-                c_viejo,
-                c_nuevo,
-                nom,
-                ape,
-                f_nac,
-                tel,
-                corr,
-                dir_hab,
-                tipo_c,
-                datetime.now().strftime("%d/%m/%Y"),
-                r_previos
-            ))
+                INSERT INTO titulares (cedula, contrato_viejo, contrato_nuevo, nombres, apellidos, fecha_nacimiento, telefono, correo, direccion, tipo_contrato, fecha_inicio, recibos_previos, notas)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (ced, c_viejo, c_nuevo, nom, ape, f_nac, tel, corr, dir_hab, tipo_c, datetime.now().strftime("%d/%m/%Y"), r_previos, notas))
 
             conn.commit()
             conn.close()
@@ -1070,6 +1341,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         """Resetea el formulario de la Pestaña 1 para ingresar un nuevo contrato."""
         txt_cedula.delete(0, "end")
         txt_cont_viejo.delete(0, "end")
+        txt_fecha_contrato_ant.delete(0, "end")
         txt_nombres.delete(0, "end")
         txt_apellidos.delete(0, "end")
         txt_fecha_nac.delete(0, "end")
@@ -1077,7 +1349,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         txt_recibos_previos.delete(0, "end")
         txt_correo.delete(0, "end")
         txt_direccion.delete(0, "end")
-
+        txt_notas_registro.delete("1.0", "end")
         combo_contrato.set("PPA velación 24 meses")
 
         lbl_edad_titular.configure(text=" Edad: -- años ")
@@ -1103,7 +1375,9 @@ def mostrar_dashboard(usuario_actual="admin"):
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT cedula, telefono, correo, direccion, nombres, apellidos, fecha_inicio FROM titulares 
+            SELECT cedula, telefono, correo, direccion, nombres, apellidos, fecha_inicio,
+            notas, contrato_viejo, contrato_nuevo, fecha_contrato_anterior
+            FROM titulares 
             WHERE cedula = ? OR UPPER(contrato_viejo) = ? OR UPPER(contrato_nuevo) = ?
             OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
         """, (crit, crit, crit, crit))
@@ -1123,7 +1397,17 @@ def mostrar_dashboard(usuario_actual="admin"):
                 txt.delete(0, "end")
                 txt.insert(0, val.title() if isinstance(val, str) and txt in [txt_ed_nom, txt_ed_ape] else (val or ""))
 
+            txt_ed_contrato_viejo.delete(0, "end")
+            txt_ed_contrato_viejo.insert(0, res[7] or "")
+
+            txt_ed_fecha_contrato_viejo.delete(0, "end")
+            txt_ed_fecha_contrato_viejo.insert(0, res[9] or "")
+
             lbl_fecha_contrato_ed.configure(text=f"fecha de contrato  {res[6] or '--/--/----'}")
+            txt_ed_notas.delete("1.0", "end")
+            txt_ed_notas.insert("1.0", res[7] or "")
+            lbl_contrato_nuevo_ed.configure(text="Contrato Sistema: --")
+            lbl_contrato_nuevo_ed.configure(text=f"Contrato Sistema: {res[8] or '--'}")
 
             for item in tabla_ed.get_children():
                 tabla_ed.delete(item)
@@ -1147,6 +1431,8 @@ def mostrar_dashboard(usuario_actual="admin"):
 
         conn.close()
 
+    
+    
     def buscar_y_calcular_pagos():
         ced = txt_busqueda_ced.get().strip().upper()
 
@@ -1157,7 +1443,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT nombres, apellidos, contrato_viejo, contrato_nuevo, recibos_previos, tipo_contrato, cedula FROM titulares 
+            SELECT nombres, apellidos, contrato_viejo, contrato_nuevo, recibos_previos, tipo_contrato, cedula, notas FROM titulares 
             WHERE cedula=? OR UPPER(contrato_viejo)=? OR UPPER(contrato_nuevo)=?
             OR cedula IN (SELECT titular_cedula FROM familiares WHERE UPPER(cedula) = ?)
         """, (ced, ced, ced, ced))
@@ -1168,6 +1454,7 @@ def mostrar_dashboard(usuario_actual="admin"):
             cedula_real = res[6]
             cedula_titular_pago[0] = cedula_real
             tipo_contrato_global[0] = res[5]
+            nota_titular_global[0] = res[7] or ""
             recibos_previos = res[4]
 
             txt_tasa.configure(state="normal")
@@ -1228,6 +1515,7 @@ def mostrar_dashboard(usuario_actual="admin"):
             )
 
             btn_procesar_pago.configure(state="normal")
+            btn_ver_notas.configure(state="normal")
             txt_tasa.focus()
 
         else:
@@ -1238,6 +1526,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
             txt_tasa.configure(state="disabled")
             btn_procesar_pago.configure(state="disabled")
+            btn_ver_notas.configure(state="disabled")
 
         conn.close()
 
@@ -1267,19 +1556,41 @@ def mostrar_dashboard(usuario_actual="admin"):
         tel = txt_ed_tel.get().strip()
         corr = txt_ed_corr.get().strip().lower()
         dir_h = txt_ed_dir.get().strip().lower()
+        notas_ed = txt_ed_notas.get("1.0", "end").strip()
+        c_viejo_ed = txt_ed_contrato_viejo.get().strip()
+        fecha_c_viejo_ed = txt_ed_fecha_contrato_viejo.get().strip()
         ced = cedula_titular_edicion[0]
 
         if not nom or not ape:
             messagebox.showwarning("Error", "Campos de texto obligatorios vacíos.")
             return
 
+        if fecha_c_viejo_ed and not validar_fecha_ddmmyyyy(fecha_c_viejo_ed):
+            messagebox.showwarning(
+                "Fecha Contrato Viejo Inválida",
+                "La fecha del contrato viejo debe tener formato DD/MM/YYYY.\nEjemplo: 15/03/2024"
+            )
+            txt_ed_fecha_contrato_viejo.focus()
+            return
+
         conn = conectar()
         cursor = conn.cursor()
 
-        cursor.execute(
-            "UPDATE titulares SET nombres=?, apellidos=?, telefono=?, correo=?, direccion=? WHERE cedula=?",
-            (nom, ape, tel, corr, dir_h, ced)
-        )
+        cursor.execute("""
+            UPDATE titulares
+            SET nombres=?, apellidos=?, telefono=?, correo=?, direccion=?,
+                notas=?, contrato_viejo=?, fecha_contrato_anterior=?
+            WHERE cedula=?
+        """, (
+            nom,
+            ape,
+            tel,
+            corr,
+            dir_h,
+            c_viejo_ed,
+            fecha_c_viejo_ed or None,
+            ced
+        ))
 
         conn.commit()
         conn.close()
@@ -1322,7 +1633,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
     # 3. Botones de la Pestaña de Registro de Clientes
     frame_botones_registro = ctk.CTkFrame(tab_clientes, fg_color="transparent")
-    frame_botones_registro.grid(row=2, column=0, columnspan=4, pady=15, padx=10, sticky="ew")
+    frame_botones_registro.grid(row=4, column=0, columnspan=4, pady=15, padx=10, sticky="ew")
 
     btn_guardar_tit = ctk.CTkButton(frame_botones_registro, text="Guardar Titular", fg_color="green", command=guardar_titular)
     btn_guardar_tit.pack(side="left", padx=5)
@@ -1400,6 +1711,200 @@ def mostrar_dashboard(usuario_actual="admin"):
     lbl_titulo_rep = ctk.CTkLabel(tab_reportes, text="📊 Resumen Estadístico de Cobranzas", font=("Arial", 16, "bold"))
     lbl_titulo_rep.pack(pady=(10, 5), padx=20, anchor="w")
 
+    # =========================================================================
+    # 1. PRIMERO: Función del reporte (DEBE ir antes del botón)
+    # =========================================================================
+    def generar_reporte_afiliados():
+        """Genera un PDF con la lista de todos los titulares y sus afiliados."""
+        try:
+            conn = conectar()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT 
+                    t.cedula,
+                    t.nombres,
+                    t.apellidos,
+                    t.contrato_nuevo,
+                    t.tipo_contrato,
+                    t.recibos_previos,
+                    (SELECT COUNT(*) FROM familiares f WHERE f.titular_cedula = t.cedula) AS total_afiliados,
+                    (SELECT COUNT(*) FROM pagos p WHERE p.titular_cedula = t.cedula) AS pagos_sistema
+                FROM titulares t
+                ORDER BY t.contrato_nuevo ASC
+            """)
+
+            titulares = cursor.fetchall()
+            conn.close()
+
+            if not titulares:
+                messagebox.showwarning(
+                    "Sin Datos",
+                    "No hay titulares registrados en el sistema para generar el reporte."
+                )
+                return
+
+            fecha_archivo = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_sugerido = f"reporte_afiliados_{fecha_archivo}.pdf"
+
+            ruta_guardar = filedialog.asksaveasfilename(
+                title="Guardar Reporte de Afiliados",
+                defaultextension=".pdf",
+                initialfile=nombre_sugerido,
+                filetypes=[("Archivo PDF", "*.pdf"), ("Todos los archivos", "*.*")]
+            )
+
+            if not ruta_guardar:
+                return
+
+            datos_tabla = []
+
+            for row in titulares:
+                cedula = row[0] or ""
+                nombres = (row[1] or "").title()
+                apellidos = (row[2] or "").title()
+                contrato_nuevo = row[3] or ""
+                tipo_contrato = row[4] or ""
+                recibos_previos = row[5] or 0
+                total_afiliados = row[6] or 0
+                pagos_sistema = row[7] or 0
+
+                cuotas_pagadas = recibos_previos + pagos_sistema
+
+                tipo_lower = tipo_contrato.lower()
+                if "24 meses" in tipo_lower:
+                    cuotas_totales = 24
+                elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
+                    cuotas_totales = 12
+                else:
+                    cuotas_totales = 24
+
+                if "24 meses" in tipo_lower:
+                    cuotas_en_ciclo = cuotas_pagadas
+                    cuotas_faltantes = max(0, cuotas_totales - cuotas_en_ciclo)
+                else:
+                    if cuotas_pagadas > 24:
+                        cuotas_en_ciclo = (cuotas_pagadas - 24) % 12
+                        if cuotas_en_ciclo == 0 and cuotas_pagadas > 24:
+                            cuotas_en_ciclo = 12
+                    else:
+                        cuotas_en_ciclo = cuotas_pagadas % 12
+                        if cuotas_en_ciclo == 0 and cuotas_pagadas > 0:
+                            cuotas_en_ciclo = 12
+                    cuotas_faltantes = max(0, 12 - cuotas_en_ciclo)
+
+                datos_tabla.append([
+                    cedula,
+                    f"{nombres} {apellidos}",
+                    contrato_nuevo,
+                    str(total_afiliados),
+                    tipo_contrato,
+                    f"{cuotas_en_ciclo}/{cuotas_totales}",
+                    str(cuotas_faltantes)
+                ])
+
+            from reportlab.lib.pagesizes import letter, landscape
+            from reportlab.lib import colors
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet
+
+            fecha_reporte = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+            doc = SimpleDocTemplate(
+                ruta_guardar,
+                pagesize=landscape(letter),
+                rightMargin=30,
+                leftMargin=30,
+                topMargin=30,
+                bottomMargin=30
+            )
+
+            styles = getSampleStyleSheet()
+            story = []
+
+            story.append(Paragraph("<b>REPORTE DE AFILIADOS</b>", styles['Title']))
+            story.append(Paragraph(
+                f"Fecha de generación: {fecha_reporte} | Sede: {SEDE_ACTUAL} | Total de titulares: {len(datos_tabla)}",
+                styles['Normal']
+            ))
+            story.append(Spacer(1, 15))
+
+            encabezados = [
+                "Cédula",
+                "Nombre Completo",
+                "Contrato N°",
+                "Afiliados",
+                "Tipo de Contrato",
+                "Cuotas Pagadas",
+                "Cuotas Faltantes"
+            ]
+
+            tabla_datos = [encabezados] + datos_tabla
+            tabla = Table(tabla_datos, colWidths=[70, 150, 70, 55, 150, 75, 75])
+
+            tabla.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1f538d")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+                ('ALIGN', (2, 1), (3, -1), 'CENTER'),
+                ('ALIGN', (5, 1), (6, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#7f8c8d")),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                ('TOPPADDING', (0, 1), (-1, -1), 5),
+            ]))
+
+            story.append(tabla)
+            story.append(Spacer(1, 20))
+
+            total_afiliados_general = sum(int(fila[3]) for fila in datos_tabla)
+            story.append(Paragraph(
+                f"<b>Resumen:</b> Total de titulares: {len(datos_tabla)} | Total de afiliados: {total_afiliados_general}",
+                styles['Normal']
+            ))
+
+            doc.build(story)
+
+            messagebox.showinfo(
+                "Reporte Generado",
+                f"✅ El reporte de afiliados fue generado exitosamente.\n\nUbicación:\n{ruta_guardar}"
+            )
+
+            import platform
+            if platform.system() == "Windows":
+                os.startfile(ruta_guardar)
+
+        except PermissionError:
+            messagebox.showerror(
+                "Error de Permisos",
+                "No se pudo guardar el PDF.\n\nIntente guardar en otra ubicación (Escritorio o Documentos)."
+            )
+        except Exception as e:
+            messagebox.showerror("Error al Generar Reporte", f"Ocurrió un error:\n\n{e}")
+
+    # =========================================================================
+    # 2. SEGUNDO: El botón (DEBE ir después de la función)
+    # =========================================================================
+    btn_reporte_afiliados = ctk.CTkButton(
+        tab_reportes,
+        text="📋 Generar Reporte de Afiliados (PDF)",
+        fg_color="#1f538d",
+        font=("Arial", 12, "bold"),
+        height=35,
+        command=generar_reporte_afiliados
+    )
+    btn_reporte_afiliados.pack(pady=(5, 10), padx=20, anchor="w")
+
+    # =========================================================================
+    # 3. TERCERO: El gráfico (al final porque tiene expand=True)
+    # =========================================================================
     frame_grafico = ctk.CTkFrame(tab_reportes, fg_color="#2b2b2b")
     frame_grafico.pack(pady=10, padx=20, fill="both", expand=True)
 
@@ -1410,13 +1915,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         conn = conectar()
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT strftime('%m/%Y', fecha_pago) as mes, SUM(monto_usd)
-            FROM pagos
-            GROUP BY mes
-            ORDER BY fecha_pago ASC
-            LIMIT 6
-        """)
+        cursor.execute("SELECT strftime('%m/%Y', fecha_pago) as mes, SUM(monto_usd) FROM pagos GROUP BY mes ORDER BY fecha_pago ASC LIMIT 6")
 
         filas = cursor.fetchall()
         conn.close()
@@ -1724,8 +2223,8 @@ def mostrar_dashboard(usuario_actual="admin"):
         txt_busq_ed.delete(0, "end")
         lbl_fecha_contrato_ed.configure(text="fecha de contrato: --/--/----")
 
-        for t in [txt_ed_nom, txt_ed_ape, txt_ed_tel, txt_ed_corr, txt_ed_dir]:
-            t.delete(0, "end")
+        for t in [txt_ed_nom, txt_ed_ape, txt_ed_tel, txt_ed_corr, txt_ed_dir]: t.delete(0, "end")
+        txt_ed_notas.delete("1.0", "end")
 
         for item in tabla_ed.get_children():
             tabla_ed.delete(item)
@@ -1751,8 +2250,43 @@ def mostrar_dashboard(usuario_actual="admin"):
         lbl_calculo_bs.configure(text="Monto a pagar: 0,00 Bs")
 
         btn_procesar_pago.configure(state="disabled")
+        btn_ver_notas.configure(state="disabled")
+        nota_titular_global[0] = ""
 
     pestanas.configure(command=gestionar_limpieza_pestanas)
+
+    # =========================================================================
+    # MOSTRAR SPLASH Y LUEGO DASHBOARD
+    # =========================================================================
+
+    def actualizar_barra_splash(valor):
+        try:
+            barra_splash.set(valor)
+        except Exception:
+            pass
+
+
+    def cerrar_splash():
+        try:
+            splash.destroy()
+        except Exception:
+            pass
+
+        ventana.deiconify()
+        ventana.lift()
+        ventana.focus_force()
+
+
+    # Permitir cerrar el splash manualmente si el usuario lo cierra
+    splash.protocol("WM_DELETE_WINDOW", cerrar_splash)
+
+    # Pequeña animación de carga
+    ventana.after(400, lambda: actualizar_barra_splash(0.55))
+    ventana.after(900, lambda: actualizar_barra_splash(0.80))
+    ventana.after(1300, lambda: actualizar_barra_splash(1.0))
+
+    # Mostrar el dashboard después del splash
+    ventana.after(1600, cerrar_splash)
 
     ventana.mainloop()
 
