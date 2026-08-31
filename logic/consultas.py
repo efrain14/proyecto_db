@@ -37,14 +37,12 @@ def obtener_meses_transcurridos(fecha_inicio_str):
 
     meses = (fecha_hoy.year - fecha_inicio.year) * 12 + (fecha_hoy.month - fecha_inicio.month)
 
-    if meses <= 0:
-        return 1
-
-    # Solo incrementamos el mes exigible si ya pasó el día del mes de cobro
+    # Solo se cuenta el mes en curso si ya pasó el día del mes de cobro
     if fecha_hoy.day > fecha_inicio.day:
-        return meses + 1
+        meses += 1
 
-    return meses
+    # El día de la firma aún no se exige ninguna cuota vencida
+    return max(0, meses)
 
 
 def consultar_estado_cliente(cedula_titular):
@@ -109,9 +107,9 @@ def consultar_estado_cliente(cedula_titular):
 
     conn.close()
 
-    # Es moroso solo si debe MÁS de 1 cuota vencida
-    # (pasaron más de 30 días sin pagar la cuota anterior)
-    es_moroso = cuotas_debitables > 1
+    # Es moroso si tiene al menos 1 cuota vencida sin pagar.
+    # Una cuota se considera vencida a partir del día siguiente a su aniversario.
+    es_moroso = cuotas_debitables > 0
 
     return {
         "meses_transcurridos": cuotas_exigibles,

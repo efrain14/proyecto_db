@@ -1,20 +1,37 @@
-import sqlite3
+# =========================================================================
+# CONEXIÓN A LA BASE DE DATOS
+# =========================================================================
+# Centraliza la ubicación de funeraria.db:
+#   - En desarrollo (python main.py): usa la raíz del proyecto.
+#   - Compilado (.exe con PyInstaller): usa la carpeta donde está el .exe.
+# =========================================================================
 import os
 import sys
+import sqlite3
+
 
 def obtener_ruta_base():
-    """ Determina la ruta raíz real del proyecto ejecutable o en desarrollo """
-    if hasattr(sys, '_MEIPASS'):
-        # Si corre como ejecutable empaquetado, usa el directorio temporal de PyInstaller
-        return sys._MEIPASS
-    # Si corre en VS Code, usa la carpeta real del proyecto
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    """
+    Devuelve la carpeta donde debe vivir funeraria.db.
+    - Si el programa corre como .exe: la misma carpeta del ejecutable.
+    - Si corre desde VS Code: la raíz del proyecto.
+    """
+    if getattr(sys, "frozen", False):
+        # Ejecutable compilado con PyInstaller
+        return os.path.dirname(sys.executable)
+
+    # Desarrollo normal
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def obtener_ruta_db():
+    """Ruta completa del archivo de base de datos."""
+    return os.path.join(obtener_ruta_base(), "funeraria.db")
+
 
 def conectar():
-    # Coloca la base de datos en la raíz del entorno de ejecución
-    ruta_db = os.path.join(obtener_ruta_base(), 'funeraria.db')
-    conn = sqlite3.connect(ruta_db)
-    return conn
+    """Abre la conexión a funeraria.db en la ubicación correcta."""
+    return sqlite3.connect(obtener_ruta_db())
 
 def inicializar_base_de_datos():
     conn = conectar()

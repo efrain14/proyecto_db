@@ -24,10 +24,10 @@ import shutil
 # Asegurar que Python localice la carpeta raíz del proyecto para las importaciones
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from database.conexion import conectar
+from database.conexion import conectar, obtener_ruta_db
 from logic.consultas import consultar_estado_cliente
 from gui.preview_recibo import abrir_previsualizacion_recibo
-from gui.reportes_gui import renderizar_grafico_cobranza
+#from gui.reportes_gui import renderizar_grafico_cobranza
 
 # Variable global de control operativo para la sucursal
 SEDE_ACTUAL = "A"
@@ -908,16 +908,11 @@ def mostrar_dashboard(usuario_actual="admin"):
     # =========================================================================
     # PESTAÑA 4: REPORTES Y ESTADOS DE CUENTA
     # =========================================================================
-    # Esta pestaña permite generar reportes PDF y ver estadísticas de cobro.
-    # =========================================================================
-
-    # Título de la pestaña de reportes
-    lbl_titulo_rep = ctk.CTkLabel(tab_reportes, text="📊 Resumen Estadístico de Cobranzas", font=("Arial", 16, "bold"))
-    lbl_titulo_rep.pack(pady=(10, 5), padx=20, anchor="w")
-
-    # Frame para el gráfico de cobros mensuales
-    frame_grafico = ctk.CTkFrame(tab_reportes, fg_color="#2b2b2b")
-    frame_grafico.pack(pady=10, padx=20, fill="both", expand=True)
+    # Esta pestaña se construye completa con construir_pestana_reportes(),
+    # que se llama en la sección de botones y enlaces (después de definir
+    # las funciones de reportes). Aquí solo se crea el frame del gráfico,
+    # SIN empacarlo todavía, para poder ubicarlo al final de la pestaña.
+    #frame_grafico = ctk.CTkFrame(tab_reportes, fg_color="#2b2b2b", height=200)
 
     # =========================================================================
     # PESTAÑA 5: CONFIGURACIÓN (Solo Administradores)
@@ -1905,239 +1900,680 @@ def mostrar_dashboard(usuario_actual="admin"):
     # FUNCIONES CALLBACK - PESTAÑA 4: REPORTES
     # =========================================================================
 
-    def generar_reporte_afiliados():
-        """
-        Genera un PDF con la lista de todos los titulares del sistema,
-        mostrando: cédula, nombre, contrato, cantidad de afiliados,
-        tipo de contrato, cuotas pagadas y cuotas faltantes.
-        Abre un diálogo para que el usuario elija dónde guardar el PDF.
-        """
-        try:
-            conn = conectar()
-            cursor = conn.cursor()
+    # =========================================================================
+    # UTILIDAD: Restar meses a una fecha (para períodos de reportes)
+    # =========================================================================
+    def restar_meses(fecha, meses):
+        """Devuelve la fecha resultante de restar N meses a la fecha dada."""
+        dias_por_mes = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        anno = fecha.year
+        mes = fecha.month - meses
 
-            cursor.execute("""
-                SELECT 
-                    t.cedula,
-                    t.nombres,
-                    t.apellidos,
-                    t.contrato_nuevo,
-                    t.tipo_contrato,
-                    t.recibos_previos,
-                    (SELECT COUNT(*) FROM familiares f WHERE f.titular_cedula = t.cedula) AS total_afiliados,
-                    (SELECT COUNT(*) FROM pagos p WHERE p.titular_cedula = t.cedula) AS pagos_sistema
-                FROM titulares t
-                ORDER BY t.contrato_nuevo ASC
-            """)
+        while mes <= 0:
+            mes += 12
+            anno -= 1
 
-            titulares = cursor.fetchall()
+        dia = min(fecha.day, dias_por_mes[mes - 1])
+        return datetime(anno, mes, dia)
+
+    # =========================================================================
+    # REPORTE 1: GENERAL (todos los titulares y sus afiliados)
+    # =========================================================================
+    def construir_datos_reporte_afiliados():
+        """
+        Consulta la base de datos y devuelve una lista de filas en texto plano.
+        Cada fila: [cédula, nombre, contrato, afiliados, tipo, pagadas, faltantes]
+        """
+        conn = conectar()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT 
+                t.cedula,
+                t.nombres,
+                t.apellidos,
+                t.contrato_nuevo,
+                t.tipo_contrato,
+                t.recibos_previos,
+                (SELECT COUNT(*) FROM familiares f WHERE f.titular_cedula = t.cedula) AS total_afiliados,
+                (SELECT COUNT(*) FROM pagos p WHERE p.titular_cedula = t.cedula) AS pagos_sistema
+            FROM titulares t
+            ORDER BY t.contrato_nuevo ASC
+        """)
+
+        titulares = cursor.fetchall()
+        conn.close()
+
+        filas = []
+
+        for row in titulares:
+            cedula = row[0] or ""
+            nombres = (row[1] or "").title()
+            apellidos = (row[2] or "").title()
+            contrato_nuevo = row[3] or ""
+            tipo_contrato = row[4] or ""
+            recibos_previos = row[5] or 0
+            total_afiliados = row[6] or 0
+            pagos_sistema = row[7] or 0
+
+            cuotas_pagadas = recibos_previos + pagos_sistema
+
+            tipo_lower = tipo_contrato.lower()
+            if "24 meses" in tipo_lower:
+                cuotas_totales = 24
+            elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
+                cuotas_totales = 12
+            else:
+                cuotas_totales = 24
+
+            if "24 meses" in tipo_lower:
+                cuotas_en_ciclo = cuotas_pagadas
+                cuotas_faltantes = max(0, cuotas_totales - cuotas_en_ciclo)
+            else:
+                if cuotas_pagadas > 24:
+                    cuotas_en_ciclo = (cuotas_pagadas - 24) % 12
+                    if cuotas_en_ciclo == 0 and cuotas_pagadas > 24:
+                        cuotas_en_ciclo = 12
+                else:
+                    cuotas_en_ciclo = cuotas_pagadas % 12
+                    if cuotas_en_ciclo == 0 and cuotas_pagadas > 0:
+                        cuotas_en_ciclo = 12
+                cuotas_faltantes = max(0, 12 - cuotas_en_ciclo)
+
+            filas.append([
+                cedula,
+                f"{nombres} {apellidos}",
+                contrato_nuevo,
+                str(total_afiliados),
+                tipo_contrato,
+                f"{cuotas_en_ciclo}/{cuotas_totales}",
+                str(cuotas_faltantes)
+            ])
+
+        return filas
+
+    # =========================================================================
+    # REPORTE 2: TITULAR INDIVIDUAL (datos + pagos del período)
+    # =========================================================================
+    def construir_reporte_titular(crit, meses):
+        """
+        Busca un titular por cédula, contrato nuevo o contrato viejo y arma
+        el reporte con sus pagos de los últimos N meses (o todo el historial).
+        Devuelve None si no encuentra al titular.
+        """
+        crit = crit.strip().upper()
+
+        conn = conectar()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT cedula, nombres, apellidos, contrato_viejo, contrato_nuevo, tipo_contrato, fecha_inicio
+            FROM titulares
+            WHERE cedula = ? OR UPPER(contrato_nuevo) = ? OR UPPER(contrato_viejo) = ?
+        """, (crit, crit, crit))
+
+        t = cursor.fetchone()
+
+        if not t:
             conn.close()
+            return None
 
-            if not titulares:
-                messagebox.showwarning(
-                    "Sin Datos",
-                    "No hay titulares registrados en el sistema para generar el reporte."
-                )
-                return
+        cedula, nombres, apellidos, c_viejo, c_nuevo, tipo_c, f_inicio = t
 
-            # Diálogo para elegir dónde guardar el PDF
-            fecha_archivo = datetime.now().strftime("%Y%m%d_%H%M%S")
-            nombre_sugerido = f"reporte_afiliados_{fecha_archivo}.pdf"
+        # Determinar el período a consultar
+        hoy = datetime.now()
 
-            ruta_guardar = filedialog.asksaveasfilename(
-                title="Guardar Reporte de Afiliados",
+        if meses:
+            limite = restar_meses(hoy, meses)
+            texto_periodo = f"Últimos {meses} meses (desde el {limite.strftime('%d/%m/%Y')})"
+            cursor.execute("""
+                SELECT num_recibo, fecha_pago, cuota_numero, forma_pago, monto_usd, monto_bs, tasa_bcv
+                FROM pagos
+                WHERE titular_cedula = ? AND fecha_pago >= ?
+                ORDER BY fecha_pago DESC
+            """, (cedula, limite.strftime("%Y-%m-%d")))
+        else:
+            texto_periodo = "Todo el historial de pagos"
+            cursor.execute("""
+                SELECT num_recibo, fecha_pago, cuota_numero, forma_pago, monto_usd, monto_bs, tasa_bcv
+                FROM pagos
+                WHERE titular_cedula = ?
+                ORDER BY fecha_pago DESC
+            """, (cedula,))
+
+        pagos = cursor.fetchall()
+        conn.close()
+
+        filas = []
+        total_usd = 0.0
+        total_bs = 0.0
+
+        for p in pagos:
+            try:
+                fecha_bonita = datetime.strptime(p[1], "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                fecha_bonita = p[1] or "S/F"
+
+            filas.append([
+                f"#{p[0]}",
+                fecha_bonita,
+                p[2] if p[2] is not None else "S/F",
+                p[3] or "N/A",
+                f"${(p[4] or 0):,.2f}",
+                f"Bs. {(p[5] or 0):,.2f}",
+                f"{(p[6] or 0):,.2f}",
+            ])
+            total_usd += p[4] or 0
+            total_bs += p[5] or 0
+
+        return {
+            "titulo": "REPORTE DE TITULAR INDIVIDUAL",
+            "lineas": [
+                f"Titular: {nombres.title()} {apellidos.title()} | Cédula: {cedula}",
+                f"Contrato Viejo: {c_viejo or 'NINGUNO'} | Contrato Sistema: {c_nuevo} | Tipo: {tipo_c}",
+                f"Fecha de contrato: {f_inicio or 'S/F'} | Período: {texto_periodo}",
+                f"Pagos en el período: {len(pagos)} | Total USD: ${total_usd:,.2f} | Total Bs: {total_bs:,.2f}",
+            ],
+            "encabezados": ["Recibo", "Fecha", "Cuota", "Método", "Monto USD", "Monto Bs", "Tasa"],
+            "filas": filas,
+            "anchos": [60, 80, 60, 110, 80, 100, 70],
+            "centradas": (0, 1, 2, 3, 6),
+            "resumen": f"Pagos: {len(pagos)} | Total: ${total_usd:,.2f}",
+            "nombre": f"reporte_titular_{cedula}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        }
+
+    # =========================================================================
+    # REPORTE 3: PAGOS POR PERÍODO (todos los titulares que pagaron)
+    # =========================================================================
+    def construir_reporte_periodo(desde_str, hasta_str):
+        """
+        Arma el reporte de todos los pagos registrados entre dos fechas
+        (inclusive), de todos los titulares.
+        Devuelve None si las fechas no son válidas.
+        """
+        if not validar_fecha_ddmmyyyy(desde_str) or not validar_fecha_ddmmyyyy(hasta_str):
+            return None
+
+        desde = datetime.strptime(desde_str, "%d/%m/%Y")
+        hasta = datetime.strptime(hasta_str, "%d/%m/%Y")
+
+        conn = conectar()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT p.fecha_pago, t.cedula, t.nombres, t.apellidos, t.contrato_nuevo,
+                   p.num_recibo, p.forma_pago, p.monto_usd, p.monto_bs
+            FROM pagos p
+            JOIN titulares t ON t.cedula = p.titular_cedula
+            WHERE p.fecha_pago BETWEEN ? AND ?
+            ORDER BY p.fecha_pago ASC, t.nombres ASC
+        """, (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
+
+        pagos = cursor.fetchall()
+        conn.close()
+
+        filas = []
+        total_usd = 0.0
+        total_bs = 0.0
+
+        for p in pagos:
+            try:
+                fecha_bonita = datetime.strptime(p[0], "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                fecha_bonita = p[0] or "S/F"
+
+            filas.append([
+                fecha_bonita,
+                p[1],
+                f"{(p[2] or '').title()} {(p[3] or '').title()}",
+                p[4] or "",
+                f"#{p[5]}",
+                p[6] or "N/A",
+                f"${(p[7] or 0):,.2f}",
+                f"Bs. {(p[8] or 0):,.2f}",
+            ])
+            total_usd += p[7] or 0
+            total_bs += p[8] or 0
+
+        return {
+            "titulo": "REPORTE DE PAGOS POR PERÍODO",
+            "lineas": [
+                f"Período: desde el {desde_str} hasta el {hasta_str}",
+                f"Pagos registrados: {len(pagos)} | Total USD: ${total_usd:,.2f} | Total Bs: {total_bs:,.2f}",
+            ],
+            "encabezados": ["Fecha", "Cédula", "Titular", "Contrato", "Recibo", "Método", "Monto USD", "Monto Bs"],
+            "filas": filas,
+            "anchos": [70, 90, 160, 70, 60, 100, 80, 100],
+            "centradas": (0, 1, 4, 5),
+            "resumen": f"Pagos: {len(pagos)} | Total: ${total_usd:,.2f}",
+            "nombre": f"reporte_periodo_{desde_str.replace('/', '')}_{hasta_str.replace('/', '')}.pdf",
+        }
+
+    # =========================================================================
+    # GENERADOR GENÉRICO DE PDF (lo usan los 3 reportes)
+    # =========================================================================
+    def guardar_pdf_reporte(titulo, lineas_info, encabezados, filas, anchos, centradas, nombre_sugerido, ruta_destino=None):
+        """
+        Genera el PDF horizontal con la tabla del reporte.
+        - Si ruta_destino es None: pregunta al usuario dónde guardar.
+        - Si ruta_destino tiene una ruta: guarda ahí sin preguntar (para imprimir).
+        Devuelve la ruta final o None si el usuario canceló.
+        """
+        from xml.sax.saxutils import escape
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+        if ruta_destino is None:
+            ruta_destino = filedialog.asksaveasfilename(
+                title="Guardar Reporte",
                 defaultextension=".pdf",
                 initialfile=nombre_sugerido,
                 filetypes=[("Archivo PDF", "*.pdf"), ("Todos los archivos", "*.*")]
             )
 
-            if not ruta_guardar:
+            if not ruta_destino:
+                return None
+
+        styles = getSampleStyleSheet()
+
+        estilo_izq = ParagraphStyle('repIzq', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black)
+        estilo_cen = ParagraphStyle('repCen', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=10, textColor=colors.black, alignment=1)
+        estilo_head = ParagraphStyle('repHead', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=1)
+
+        story = [Paragraph(f"<b>{escape(titulo)}</b>", styles['Title'])]
+
+        for linea in lineas_info:
+            story.append(Paragraph(escape(linea), styles['Normal']))
+
+        story.append(Spacer(1, 10))
+
+        datos_tabla = [[Paragraph(escape(str(h)), estilo_head) for h in encabezados]]
+
+        for fila in filas:
+            datos_tabla.append([
+                Paragraph(escape(str(celda)), estilo_cen if i in centradas else estilo_izq)
+                for i, celda in enumerate(fila)
+            ])
+
+        tabla = Table(datos_tabla, colWidths=anchos)
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1f538d")),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#7f8c8d")),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ]))
+
+        story.append(tabla)
+
+        doc = SimpleDocTemplate(
+            ruta_destino,
+            pagesize=landscape(letter),
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=30,
+            bottomMargin=30
+        )
+
+        doc.build(story)
+
+        return ruta_destino
+
+    # =========================================================================
+    # CENTRO DE REPORTES: ventana con vista previa y guardado opcional
+    # =========================================================================
+    def construir_pestana_reportes():
+        """
+        Construye el Centro de Reportes DENTRO de la pestaña
+        "Reportes y Estados de Cuenta", sin abrir ventanas nuevas.
+        Orden visual (de arriba a abajo):
+          1. Título
+          2. Selector de tipo de reporte
+          3. Parámetros dinámicos
+          4. Botones de acción (siempre visibles)
+          5. Tabla de vista previa (ocupa el espacio libre)
+          6. Resumen
+          7. Gráfico de cobranzas (altura fija)
+        """
+        # Datos de la vista previa actual (los usa Guardar/Imprimir)
+        datos_preview = {"listo": False}
+
+        # Widgets de parámetros dinámicos
+        params = {}
+
+        # -----------------------------------------------------------------
+        # 1. Título
+        # -----------------------------------------------------------------
+        ctk.CTkLabel(tab_reportes, text="📊 Centro de Reportes", font=("Arial", 16, "bold")).pack(pady=(10, 5), padx=20, anchor="w")
+
+        # -----------------------------------------------------------------
+        # 2. Selector de tipo de reporte
+        # -----------------------------------------------------------------
+        frame_tipo = ctk.CTkFrame(tab_reportes, fg_color="transparent")
+        frame_tipo.pack(pady=2, padx=20, fill="x")
+
+        ctk.CTkLabel(frame_tipo, text="Tipo de Reporte:", font=("Arial", 12, "bold")).pack(side="left", padx=(0, 10))
+
+        tipos_reporte = [
+            "General (todos los titulares)",
+            "Titular Individual",
+            "Pagos por Período",
+        ]
+
+        # -----------------------------------------------------------------
+        # 3. Parámetros dinámicos
+        # -----------------------------------------------------------------
+        frame_params = ctk.CTkFrame(tab_reportes, fg_color="transparent")
+        frame_params.pack(pady=2, padx=20, fill="x")
+
+        def redibujar_parametros():
+            """Muestra solo los parámetros que necesita el tipo elegido."""
+            for w in frame_params.winfo_children():
+                w.destroy()
+
+            tipo = combo_tipo.get()
+
+            if tipo == "Titular Individual":
+                ctk.CTkLabel(frame_params, text="Cédula o Contrato:", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=5, sticky="w")
+                params["txt_busq"] = ctk.CTkEntry(frame_params, width=220, placeholder_text="V12345678 o A-00001")
+                params["txt_busq"].grid(row=1, column=0, padx=5, pady=2)
+
+                ctk.CTkLabel(frame_params, text="Período:", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=5, sticky="w")
+                params["combo_meses"] = ctk.CTkComboBox(
+                    frame_params,
+                    values=["Últimos 1 mes", "Últimos 3 meses", "Últimos 6 meses", "Últimos 12 meses", "Todos los pagos"],
+                    width=160
+                )
+                params["combo_meses"].set("Últimos 6 meses")
+                params["combo_meses"].grid(row=1, column=1, padx=5, pady=2)
+
+            elif tipo == "Pagos por Período":
+                ctk.CTkLabel(frame_params, text="Desde (DD/MM/YYYY):", font=("Arial", 11, "bold")).grid(row=0, column=0, padx=5, sticky="w")
+                params["txt_desde"] = ctk.CTkEntry(
+                    frame_params, width=130, placeholder_text="DD/MM/YYYY",
+                    validate="key", validatecommand=(v_fecha, '%P')
+                )
+                params["txt_desde"].grid(row=1, column=0, padx=5, pady=2)
+
+                ctk.CTkLabel(frame_params, text="Hasta (DD/MM/YYYY):", font=("Arial", 11, "bold")).grid(row=0, column=1, padx=5, sticky="w")
+                params["txt_hasta"] = ctk.CTkEntry(
+                    frame_params, width=130, placeholder_text="DD/MM/YYYY",
+                    validate="key", validatecommand=(v_fecha, '%P')
+                )
+                params["txt_hasta"].grid(row=1, column=1, padx=5, pady=2)
+
+        combo_tipo = ctk.CTkComboBox(
+            frame_tipo,
+            values=tipos_reporte,
+            width=280,
+            command=lambda e: redibujar_parametros()
+        )
+        combo_tipo.set(tipos_reporte[0])
+        combo_tipo.pack(side="left")
+
+        redibujar_parametros()
+
+        # -----------------------------------------------------------------
+        # 4. Frame de botones de acción (se empaca ANTES que la vista previa
+        #    para que los botones NUNCA queden tapados)
+        # -----------------------------------------------------------------
+        frame_botones_rep = ctk.CTkFrame(tab_reportes, fg_color="transparent")
+        frame_botones_rep.pack(pady=5, padx=20, fill="x")
+
+        # -----------------------------------------------------------------
+        # 5. Área de vista previa (ocupa el espacio libre de la pestaña)
+        # -----------------------------------------------------------------
+        frame_preview = ctk.CTkFrame(tab_reportes)
+        frame_preview.pack(pady=5, padx=20, fill="both", expand=True)
+
+        # -----------------------------------------------------------------
+        # 6. Etiqueta de resumen
+        # -----------------------------------------------------------------
+        lbl_resumen = ctk.CTkLabel(tab_reportes, text="", font=("Arial", 11, "bold"), text_color="#2ecc71")
+        lbl_resumen.pack(pady=(0, 5), padx=20, anchor="w")
+
+        # -----------------------------------------------------------------
+        # 7. Gráfico de cobranzas (altura fija para no robar espacio)
+        # -----------------------------------------------------------------
+        #frame_grafico.pack(pady=(0, 10), padx=20, fill="x")
+
+        # -----------------------------------------------------------------
+        # FUNCIONES DE ACCIÓN (definidas antes de crear los botones)
+        # -----------------------------------------------------------------
+
+        def previsualizar():
+            """Consulta los datos según el tipo y los muestra en la tabla."""
+            tipo = combo_tipo.get()
+
+            if tipo == tipos_reporte[0]:
+                # ---------------- REPORTE GENERAL ----------------
+                filas = construir_datos_reporte_afiliados()
+
+                if not filas:
+                    messagebox.showwarning("Sin Datos", "No hay titulares registrados.")
+                    return
+
+                datos_preview.clear()
+                datos_preview.update({
+                    "listo": True,
+                    "titulo": "REPORTE DE AFILIADOS",
+                    "lineas": [f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Sede: {SEDE_ACTUAL}"],
+                    "encabezados": ["Cédula", "Nombre Completo", "Contrato N°", "Afiliados", "Tipo de Contrato", "Cuotas Pagadas", "Cuotas Faltantes"],
+                    "filas": filas,
+                    "anchos": [70, 150, 70, 55, 150, 75, 75],
+                    "centradas": (0, 2, 3, 5, 6),
+                    "resumen": f"Total de titulares: {len(filas)} | Total de afiliados: {sum(int(f[3]) for f in filas)}",
+                    "nombre": f"reporte_afiliados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                })
+
+            elif tipo == tipos_reporte[1]:
+                # ---------------- TITULAR INDIVIDUAL ----------------
+                crit = params.get("txt_busq").get().strip()
+
+                if not crit:
+                    messagebox.showwarning("Falta Dato", "Ingrese la cédula o el contrato del titular.")
+                    return
+
+                mapa_meses = {
+                    "Últimos 1 mes": 1,
+                    "Últimos 3 meses": 3,
+                    "Últimos 6 meses": 6,
+                    "Últimos 12 meses": 12,
+                    "Todos los pagos": None,
+                }
+
+                resultado = construir_reporte_titular(crit, mapa_meses.get(params.get("combo_meses").get(), 6))
+
+                if resultado is None:
+                    messagebox.showerror("No Encontrado", "Ningún titular coincide con esa cédula o contrato.")
+                    return
+
+                datos_preview.clear()
+                datos_preview.update(resultado)
+                datos_preview["listo"] = True
+
+            else:
+                # ---------------- PAGOS POR PERÍODO ----------------
+                resultado = construir_reporte_periodo(
+                    params.get("txt_desde").get().strip(),
+                    params.get("txt_hasta").get().strip()
+                )
+
+                if resultado is None:
+                    messagebox.showwarning("Fecha Inválida", "Revise las fechas. Deben tener formato DD/MM/YYYY.")
+                    return
+
+                if not resultado["filas"]:
+                    messagebox.showwarning("Sin Datos", "No hay pagos registrados en ese período.")
+                    return
+
+                datos_preview.clear()
+                datos_preview.update(resultado)
+                datos_preview["listo"] = True
+
+            # ---------------- Redibujar la tabla de vista previa ----------------
+            for w in frame_preview.winfo_children():
+                w.destroy()
+
+            cols = tuple(f"c{i}" for i in range(len(datos_preview["encabezados"])))
+            arbol = ttk.Treeview(frame_preview, columns=cols, show="headings", height=10)
+
+            for i, (col, head) in enumerate(zip(cols, datos_preview["encabezados"])):
+                arbol.heading(col, text=head)
+                arbol.column(col, width=datos_preview["anchos"][i], anchor="center")
+
+            barra = ttk.Scrollbar(frame_preview, orient="vertical", command=arbol.yview)
+            arbol.configure(yscrollcommand=barra.set)
+
+            for fila in datos_preview["filas"]:
+                arbol.insert("", "end", values=fila)
+
+            arbol.pack(side="left", fill="both", expand=True)
+            barra.pack(side="right", fill="y")
+
+            lbl_resumen.configure(text=datos_preview["resumen"])
+
+        def guardar_pdf():
+            """Guarda como PDF lo que está en la vista previa."""
+            if not datos_preview.get("listo"):
+                messagebox.showwarning("Sin Vista Previa", "Primero presione 'Previsualizar'.")
                 return
 
-            from reportlab.lib.pagesizes import letter, landscape
-            from reportlab.lib import colors
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            try:
+                ruta = guardar_pdf_reporte(
+                    datos_preview["titulo"],
+                    datos_preview["lineas"],
+                    datos_preview["encabezados"],
+                    datos_preview["filas"],
+                    datos_preview["anchos"],
+                    datos_preview["centradas"],
+                    datos_preview["nombre"],
+                    ruta_destino=None,
+                )
+            except PermissionError:
+                messagebox.showerror("Error de Permisos", "No se pudo guardar el PDF. Intente otra ubicación.")
+                return
+            except Exception as e:
+                messagebox.showerror("Error al Generar PDF", f"Ocurrió un error:\n\n{e}")
+                return
 
-            styles = getSampleStyleSheet()
-            
-            # Estilo para que el texto largo se ajuste dentro de la celda
-            estilo_celda_reporte = ParagraphStyle(
-                'celdaReporte',
-                parent=styles['Normal'],
-                fontName='Helvetica',
-                fontSize=8,
-                leading=10,
-                textColor=colors.black
-                        )
+            if ruta:
+                messagebox.showinfo("Reporte Generado", f"✅ El reporte fue guardado en:\n\n{ruta}")
+                os.startfile(ruta)
 
+        def imprimir_reporte():
+            """
+            Envía el reporte de la vista previa directo a la impresora
+            predeterminada, sin necesidad de guardarlo como PDF antes.
+            """
+            if not datos_preview.get("listo"):
+                messagebox.showwarning("Sin Vista Previa", "Primero presione 'Previsualizar'.")
+                return
 
-            # Preparar datos para la tabla del PDF
-            datos_tabla = []
+            import tempfile
 
-            for row in titulares:
-                cedula = row[0] or ""
-                nombres = (row[1] or "").title()
-                apellidos = (row[2] or "").title()
-                contrato_nuevo = row[3] or ""
-                tipo_contrato = row[4] or ""
-                recibos_previos = row[5] or 0
-                total_afiliados = row[6] or 0
-                pagos_sistema = row[7] or 0
-
-                cuotas_pagadas = recibos_previos + pagos_sistema
-
-                # Determinar cuotas totales según el tipo de plan
-                tipo_lower = tipo_contrato.lower()
-                if "24 meses" in tipo_lower:
-                    cuotas_totales = 24
-                elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
-                    cuotas_totales = 12
-                else:
-                    cuotas_totales = 24
-
-                # Calcular cuotas en el ciclo actual
-                if "24 meses" in tipo_lower:
-                    cuotas_en_ciclo = cuotas_pagadas
-                    cuotas_faltantes = max(0, cuotas_totales - cuotas_en_ciclo)
-                else:
-                    if cuotas_pagadas > 24:
-                        cuotas_en_ciclo = (cuotas_pagadas - 24) % 12
-                        if cuotas_en_ciclo == 0 and cuotas_pagadas > 24:
-                            cuotas_en_ciclo = 12
-                    else:
-                        cuotas_en_ciclo = cuotas_pagadas % 12
-                        if cuotas_en_ciclo == 0 and cuotas_pagadas > 0:
-                            cuotas_en_ciclo = 12
-                    cuotas_faltantes = max(0, 12 - cuotas_en_ciclo)
-
-                    datos_tabla.append([
-                        cedula,
-                        Paragraph(f"{nombres} {apellidos}", estilo_celda_reporte),
-                        contrato_nuevo,
-                        str(total_afiliados),
-                        Paragraph(tipo_contrato, estilo_celda_reporte),
-                        f"{cuotas_en_ciclo}/{cuotas_totales}",
-                        str(cuotas_faltantes)
-                    ])
-
-            # Generar el PDF usando ReportLab
-            
-
-            fecha_reporte = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-            doc = SimpleDocTemplate(
-                ruta_guardar,
-                pagesize=landscape(letter),
-                rightMargin=30,
-                leftMargin=30,
-                topMargin=30,
-                bottomMargin=30
+            # Generar un PDF temporal solo para imprimir
+            ruta_temp = os.path.join(
+                tempfile.gettempdir(),
+                f"reporte_print_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.pdf"
             )
 
-            
+            try:
+                guardar_pdf_reporte(
+                    datos_preview["titulo"],
+                    datos_preview["lineas"],
+                    datos_preview["encabezados"],
+                    datos_preview["filas"],
+                    datos_preview["anchos"],
+                    datos_preview["centradas"],
+                    datos_preview["nombre"],
+                    ruta_destino=ruta_temp,
+                )
+            except Exception as e:
+                messagebox.showerror("Error de Impresión", f"No se pudo generar el reporte para imprimir:\n\n{e}")
+                return
 
-            story = []
+            try:
+                # Enviar directo a la impresora predeterminada de Windows
+                os.startfile(ruta_temp, "print")
+                messagebox.showinfo("Imprimiendo", "🖨 El reporte fue enviado a la impresora predeterminada.")
+            except Exception:
+                # Si no hay verbo de impresión, abrir el visor para imprimir desde ahí
+                os.startfile(ruta_temp)
+                messagebox.showwarning(
+                    "Impresión",
+                    "No se pudo enviar directo a la impresora.\n\n"
+                    "El reporte se abrió en su visor PDF.\n"
+                    "Imprímalo desde ahí con Ctrl + P."
+                )
 
-            # Título del reporte
-            story.append(Paragraph("<b>REPORTE DE AFILIADOS</b>", styles['Title']))
-            story.append(Paragraph(
-                f"Fecha de generación: {fecha_reporte} | Sede: {SEDE_ACTUAL} | Total de titulares: {len(datos_tabla)}",
-                styles['Normal']
-            ))
-            story.append(Spacer(1, 15))
+        # -----------------------------------------------------------------
+        # BOTONES DE ACCIÓN (se crean al final, cuando las funciones existen)
+        # -----------------------------------------------------------------
+        ctk.CTkButton(
+            frame_botones_rep,
+            text="🔍 Previsualizar",
+            fg_color="#27ae60",
+            font=("Arial", 12, "bold"),
+            command=previsualizar
+        ).pack(side="left", padx=5)
 
-            # Tabla de datos
-            encabezados = [
-                "Cédula",
-                "Nombre Completo",
-                "Contrato N°",
-                "Afiliados",
-                "Tipo de Contrato",
-                "Cuotas Pagadas",
-                "Cuotas Faltantes"
-            ]
+        ctk.CTkButton(
+            frame_botones_rep,
+            text="💾 Guardar como PDF",
+            fg_color="#1f538d",
+            font=("Arial", 12, "bold"),
+            command=guardar_pdf
+        ).pack(side="left", padx=5)
 
-            tabla_datos = [encabezados] + datos_tabla
-            tabla = Table(tabla_datos, colWidths=[70, 150, 70, 55, 150, 75, 75])
+        ctk.CTkButton(
+            frame_botones_rep,
+            text="🖨 Imprimir Reporte",
+            fg_color="#8e44ad",
+            font=("Arial", 12, "bold"),
+            command=imprimir_reporte
+        ).pack(side="left", padx=5)
 
-            tabla.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1f538d")),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('TOPPADDING', (0, 0), (-1, 0), 8),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (0, 1), (0, -1), 'CENTER'),
-                ('ALIGN', (2, 1), (3, -1), 'CENTER'),
-                ('ALIGN', (5, 1), (6, -1), 'CENTER'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#7f8c8d")),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
-                ('TOPPADDING', (0, 1), (-1, -1), 5),
-            ]))
+        ctk.CTkButton(
+            frame_botones_rep,
+            text="Salir del Sistema",
+            fg_color="#d35400",
+            command=ventana.destroy
+        ).pack(side="right", padx=5)
 
-            story.append(tabla)
-            story.append(Spacer(1, 20))
-
-            # Resumen al final del reporte
-            total_afiliados_general = sum(int(fila[3]) for fila in datos_tabla)
-            story.append(Paragraph(
-                f"<b>Resumen:</b> Total de titulares: {len(datos_tabla)} | Total de afiliados: {total_afiliados_general}",
-                styles['Normal']
-            ))
-
-            doc.build(story)
-
-            messagebox.showinfo(
-                "Reporte Generado",
-                f"✅ El reporte de afiliados fue generado exitosamente.\n\nUbicación:\n{ruta_guardar}"
-            )
-
-            # Abrir el PDF automáticamente en Windows
-            import platform
-            if platform.system() == "Windows":
-                os.startfile(ruta_guardar)
-
-        except PermissionError:
-            messagebox.showerror(
-                "Error de Permisos",
-                "No se pudo guardar el PDF.\n\nIntente guardar en otra ubicación (Escritorio o Documentos)."
-            )
-        except Exception as e:
-            messagebox.showerror("Error al Generar Reporte", f"Ocurrió un error:\n\n{e}")
+        # Cargar el gráfico de cobranzas al construir la pestaña
+        #cargar_reporte_cobros()
 
     def cargar_reporte_cobros():
         """
         Carga el gráfico de cobros mensuales en la pestaña de reportes.
         Muestra los últimos 6 meses con el total cobrado en cada uno.
         """
-        for widget in frame_grafico.winfo_children():
-            widget.destroy()
+        # for widget in frame_grafico.winfo_children():
+        #     widget.destroy()
 
-        conn = conectar()
-        cursor = conn.cursor()
+        # conn = conectar()
+        # cursor = conn.cursor()
 
-        cursor.execute("SELECT strftime('%m/%Y', fecha_pago) as mes, SUM(monto_usd) FROM pagos GROUP BY mes ORDER BY fecha_pago ASC LIMIT 6")
+        # cursor.execute("SELECT strftime('%m/%Y', fecha_pago) as mes, SUM(monto_usd) FROM pagos GROUP BY mes ORDER BY fecha_pago ASC LIMIT 6")
 
-        filas = cursor.fetchall()
-        conn.close()
+        # filas = cursor.fetchall()
+        # conn.close()
 
-        datos_meses = {}
+        # datos_meses = {}
 
-        if filas:
-            for mes, monto in filas:
-                datos_meses[mes or "S/F"] = monto or 0.0
-        else:
-            datos_meses = {"Ene": 0, "Feb": 0, "Mar": 0}
+        # if filas:
+        #     for mes, monto in filas:
+        #         datos_meses[mes or "S/F"] = monto or 0.0
+        # else:
+        #     datos_meses = {"Ene": 0, "Feb": 0, "Mar": 0}
 
-        try:
-            renderizar_grafico_cobranza(frame_grafico, datos_meses)
-        except Exception as ex:
-            ctk.CTkLabel(frame_grafico, text=f"No se pudo cargar el gráfico: {ex}", font=("Arial", 12)).pack(pady=20)
+        # try:
+        #     renderizar_grafico_cobranza(frame_grafico, datos_meses)
+        # except Exception as ex:
+        #     ctk.CTkLabel(frame_grafico, text=f"No se pudo cargar el gráfico: {ex}", font=("Arial", 12)).pack(pady=20)
             
     # =========================================================================
     # FUNCIONES CALLBACK - PESTAÑA 5: CONFIGURACIÓN (Solo Administradores)
@@ -2161,7 +2597,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
             if destino:
                 try:
-                    ruta_origen = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'funeraria.db'))
+                    ruta_origen = obtener_ruta_db()
                     shutil.copy2(ruta_origen, destino)
 
                     messagebox.showinfo(
@@ -2442,21 +2878,8 @@ def mostrar_dashboard(usuario_actual="admin"):
     frame_acciones_p.pack(pady=15, padx=20, fill="x")
     ctk.CTkButton(frame_acciones_p, text="Salir", fg_color="#d35400", command=ventana.destroy).grid(row=0, column=1, padx=20)
 
-    # --- PESTAÑA 4: Botones de Reportes ---
-    btn_reporte_afiliados = ctk.CTkButton(
-        tab_reportes,
-        text="📋 Generar Reporte de Afiliados (PDF)",
-        fg_color="#1f538d",
-        font=("Arial", 12, "bold"),
-        height=35,
-        command=generar_reporte_afiliados
-    )
-    btn_reporte_afiliados.pack(pady=(5, 10), padx=20, anchor="w")
-
-    # Botón Salir de la pestaña de reportes
-    frame_salir_reportes = ctk.CTkFrame(tab_reportes, fg_color="transparent")
-    frame_salir_reportes.pack(pady=10, padx=20, fill="x")
-    ctk.CTkButton(frame_salir_reportes, text="Salir del Sistema", fg_color="#d35400", command=ventana.destroy).pack(side="right", padx=5)
+    # --- PESTAÑA 4: Construir el Centro de Reportes dentro de la pestaña ---
+    construir_pestana_reportes()
 
     # --- PESTAÑA 5: Configurar botones de administración ---
     if es_admin:
