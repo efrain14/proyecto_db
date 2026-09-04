@@ -20,6 +20,7 @@ import re
 import sys
 import os
 import shutil
+from gui.contrato_gui import abrir_modulo_contrato
 
 # Asegurar que Python localice la carpeta raíz del proyecto para las importaciones
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -1129,6 +1130,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
             btn_add_fam.configure(state="normal")
             refrescar_tabla_familiares(ced)
+            btn_contrato.configure(state="normal")
 
             # Generar el siguiente número de contrato para el próximo registro
             txt_cont_nuevo.configure(state="normal")
@@ -1173,6 +1175,7 @@ def mostrar_dashboard(usuario_actual="admin"):
             tabla.delete(item)
 
         btn_add_fam.configure(state="disabled")
+        btn_contrato.configure(state="disabled")
         txt_cedula.focus()
 
     # =========================================================================
@@ -2817,6 +2820,16 @@ def mostrar_dashboard(usuario_actual="admin"):
         )
     )
     btn_add_fam.pack(side="left", padx=5)
+    
+    btn_contrato = ctk.CTkButton(
+        frame_botones_registro,
+        text="📄 Generar Contrato",
+        fg_color="#16a085",
+        state="disabled",
+        command=lambda: abrir_modulo_contrato(ventana, txt_cedula.get().strip().upper())
+    )
+    btn_contrato.pack(side="left", padx=5)
+
 
     btn_nuevo_contrato = ctk.CTkButton(frame_botones_registro, text="✨ Nuevo Contrato", fg_color="#8e44ad", command=limpiar_formulario_registro)
     btn_nuevo_contrato.pack(side="left", padx=5)
