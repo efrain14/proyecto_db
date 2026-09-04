@@ -1515,6 +1515,24 @@ def mostrar_dashboard(usuario_actual="admin"):
 
             btn_procesar_pago.configure(state="normal")
             btn_ver_notas.configure(state="normal")
+
+            # ---------------------------------------------------------
+            # AVISO VISUAL DE NOTAS:
+            # Si el titular tiene notas guardadas, el botón se pinta
+            # ROJO para que el operario lo note sin tener que abrirlo.
+            # Si no tiene notas, queda en su color morado normal.
+            # ---------------------------------------------------------
+            if nota_titular_global[0]:
+                btn_ver_notas.configure(
+                    fg_color="#c0392b",
+                    text="📝 Ver Notas (este titular tiene notas)"
+                )
+            else:
+                btn_ver_notas.configure(
+                    fg_color="#8e44ad",
+                    text="📝 Ver Notas del Titular"
+                )
+
             txt_tasa.focus()
 
         else:
@@ -2971,6 +2989,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
         btn_procesar_pago.configure(state="disabled")
         btn_ver_notas.configure(state="disabled")
+        btn_ver_notas.configure(fg_color="#8e44ad", text="📝 Ver Notas del Titular")
         nota_titular_global[0] = ""
 
     # Vincular la limpieza al cambio de pestaña
