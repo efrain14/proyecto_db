@@ -8,7 +8,7 @@
 import os
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -26,8 +26,7 @@ from xml.sax.saxutils import escape
 
 from database.conexion import conectar
 
-# Ruta opcional del logo: si existe "logo_cavela.png" en la raíz del
-# proyecto, se usa; si no, se imprime el membrete solo con texto.
+# Ruta opcional del logo
 RUTA_LOGO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'logo_cavela.png'))
 
 
@@ -96,9 +95,31 @@ def calcular_edad(fecha_str):
         return ""
 
 
-def _linea(v, guiones=25):
-    """Devuelve el valor o una línea de guiones si está vacío (para llenar a mano)."""
+def calcular_fecha_vencimiento(fecha_emision_str, tipo_contrato):
+    """
+    Calcula la fecha de vencimiento según el tipo de contrato.
+    - PPA 24 meses: vence 1 mes después de la emisión
+    - Renovación 12 meses: vence 1 mes después
+    """
+    try:
+        emision = datetime.strptime(fecha_emision_str, "%d/%m/%Y")
+    except Exception:
+        emision = datetime.now()
+
+    # Todos los contratos vencen 1 mes después de la emisión
+    # (la primera cuota)
+    vencimiento = emision + timedelta(days=30)
+    return vencimiento.strftime("%d/%m/%Y")
+
+
+def _linea(v, guiones=20):
+    """Devuelve el valor o una línea de guiones si está vacío."""
     return str(v) if v else "_" * guiones
+
+
+def vincular_salto_enter(widget_actual, widget_siguiente):
+    """Permite avanzar de casilla con la tecla Enter."""
+    widget_actual.bind("<Return>", lambda e: widget_siguiente.focus())
 
 
 # =========================================================================
@@ -131,17 +152,26 @@ def consultar_datos_contrato(cedula):
     tipo = t[6] or ""
     tipo_lower = tipo.lower()
 
-    # PLAN A = solo velación | PLAN B = velación + entierro
-    plan = "B" if "entierro" in tipo_lower else "A"
+    # Determinar el nombre completo del plan
+    if "entierro" in tipo_lower:
+        if "renovación" in tipo_lower or "renovacion" in tipo_lower:
+            nombre_plan = "RENOVACIÓN ANUAL + ENTIERRO 12 MESES"
+            cuotas = 12
+        else:
+            nombre_plan = "PPA VELACIÓN + ENTIERRO 24 MESES"
+            cuotas = 24
+    else:
+        if "renovación" in tipo_lower or "renovacion" in tipo_lower:
+            nombre_plan = "RENOVACIÓN ANUAL 12 MESES"
+            cuotas = 12
+        else:
+            nombre_plan = "PPA VELACIÓN 24 MESES"
+            cuotas = 24
+
     cuota = 20.0 if "entierro" in tipo_lower else 10.0
-    cuotas = 12 if "renovación" in tipo_lower or "renovacion" in tipo_lower else 24
 
     hoy = datetime.now()
-    mes_sig = hoy.month + 1
-    anno_sig = hoy.year
-    if mes_sig > 12:
-        mes_sig = 1
-        anno_sig += 1
+    vencimiento = hoy + timedelta(days=30)
 
     return {
         "cedula": t[0],
@@ -151,15 +181,15 @@ def consultar_datos_contrato(cedula):
         "telefono": t[4] or "",
         "direccion": t[5] or "",
         "tipo_contrato": tipo,
+        "nombre_plan": nombre_plan,
         "contrato_nuevo": t[7] or "",
-        "plan": plan,
         "cuota": cuota,
         "cuotas": cuotas,
         "total": cuota * cuotas,
         "plazo": f"{cuotas} meses",
         "afiliados": fam,
         "fecha_emision": hoy.strftime("%d/%m/%Y"),
-        "fecha_vencimiento": f"{min(hoy.day, 28):02d}/{mes_sig:02d}/{anno_sig}",
+        "fecha_vencimiento": vencimiento.strftime("%d/%m/%Y"),
     }
 
 
@@ -171,10 +201,6 @@ def generar_contrato_pdf(d, ruta_destino):
     """
     Genera el PDF del contrato.
     d = diccionario con todos los datos (automáticos + del operario).
-
-    NOTA TÉCNICA: la función P() NO escapa el texto porque recibe formato
-    HTML intencional (<b>, <br/>, &nbsp;). Los DATOS VARIABLES se escapan
-    con E() antes de insertarlos, para que ningún dato rompa el PDF.
     """
     doc = SimpleDocTemplate(
         ruta_destino, pagesize=letter,
@@ -191,15 +217,12 @@ def generar_contrato_pdf(d, ruta_destino):
     clau = ParagraphStyle('clau', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13)
 
     def P(txt, st=mini):
-        """Párrafo con formato HTML intencional (NO se escapa)."""
         return Paragraph(str(txt), st)
 
     def E(v):
-        """Escapa solo los datos variables (nombres, cédulas, etc.)."""
         return escape(str(v))
 
-    def linea(v, guiones=25):
-        """Valor escapado o línea de guiones para llenar a mano."""
+    def linea(v, guiones=20):
         return escape(str(v)) if v else "_" * guiones
 
     NEGRO = colors.black
@@ -274,19 +297,20 @@ def generar_contrato_pdf(d, ruta_destino):
     ))
     story.append(Spacer(1, 6))
 
-    # --- DATOS DEL COMPRADOR ---
+    # --- DATOS DEL COMPRADOR (optimizado: 5 campos en primera línea) ---
     filas = [
         [P("DATOS DEL COMPRADOR", sec), '', '', ''],
         [P(f"Titular: <b>{E(d['titular'])}</b>"), '', '', ''],
-        [P(f"Estado Civil: {linea(d['estado_civil'], 15)}"), '', P(f"C.I.: <b>{E(d['cedula'])}</b>"), P(f"Edad: {linea(d['edad'], 4)}")],
-        [P(f"Nacionalidad: {linea(d['nacionalidad'], 12)}"), P(f"Profesión: {linea(d['profesion'], 15)}"), '', P(f"Fecha de Nacimiento: <b>{E(d['fecha_nac'])}</b>")],
+        [
+            P(f"Estado Civil: {linea(d['estado_civil'], 12)}"),
+            P(f"C.I.: <b>{E(d['cedula'])}</b>"),
+            P(f"Edad: {linea(d['edad'], 3)}"),
+            P(f"Nacionalidad: {linea(d['nacionalidad'], 10)}")
+        ],
         [P(f"Dirección de habitación: <b>{E(d['direccion'])}</b>"), '', '', ''],
+        [P(f"Nombre de la empresa: {linea(d['empresa'], 30)}"), '', P(f"Dirección de trabajo: {linea(d['dir_trabajo'], 30)}"), ''],
         [P("", mini), '', '', ''],
-        [P(f"Punto de referencia: {linea(d['punto_ref'], 60)}"), '', '', ''],
-        [P(f"Nombre de la empresa: {linea(d['empresa'], 60)}"), '', '', ''],
-        [P(f"Dirección de oficina o trabajo: {linea(d['dir_trabajo'], 55)}"), '', '', ''],
-        [P("", mini), '', P(f"Departamento: {linea(d['departamento'], 15)}"), ''],
-        [P(f"Teléfonos: <b>{E(d['telefono'])}</b>"), '', P(f"Telf. Trabajo: {linea(d['ext'], 6)}"), ''],
+        [P(f"Teléfonos: <b>{E(d['telefono'])}</b>"), '', P(f"Telf Trabajo: {linea(d['ext'], 10)}"), ''],
     ]
 
     t_datos = Table(filas, colWidths=[170, 170, 100, 100])
@@ -295,16 +319,12 @@ def generar_contrato_pdf(d, ruta_destino):
         ('BACKGROUND', (0, 0), (-1, 0), GRIS),
         ('SPAN', (0, 0), (3, 0)),
         ('SPAN', (0, 1), (3, 1)),
-        ('SPAN', (0, 2), (1, 2)),
-        ('SPAN', (1, 3), (2, 3)),
-        ('SPAN', (0, 4), (3, 4)),
+        ('SPAN', (0, 3), (3, 3)),
+        ('SPAN', (0, 4), (1, 4)),
+        ('SPAN', (2, 4), (3, 4)),
         ('SPAN', (0, 5), (3, 5)),
-        ('SPAN', (0, 6), (3, 6)),
-        ('SPAN', (0, 7), (3, 7)),
-        ('SPAN', (0, 8), (3, 8)),
-        ('SPAN', (0, 9), (1, 9)),
-        ('SPAN', (2, 9), (3, 9)),
-        ('SPAN', (0, 10), (1, 10)),
+        ('SPAN', (0, 6), (1, 6)),
+        ('SPAN', (2, 6), (3, 6)),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
@@ -358,17 +378,14 @@ def generar_contrato_pdf(d, ruta_destino):
     story.append(t_comp)
     story.append(Spacer(1, 6))
 
-    # --- CONDICIONES DE PAGO ---
+    # --- CONDICIONES DE PAGO (optimizado) ---
     cantidad_letras = d.get("cantidad_letras") or (monto_en_letras(d.get("monto_bs")) if d.get("monto_bs") else "")
 
     filas_pago = [
         [P("CONDICIONES DE PAGO", sec), '', '', ''],
         [P(f"Recibimos de: <b>{E(d['titular'])}</b> &nbsp;&nbsp; C.I.: <b>{E(d['cedula'])}</b>"), '', '', ''],
         [P(f"La Cantidad de: {linea(cantidad_letras, 60)}"), '', '', ''],
-        [P("", mini), '', P(f"<b>Bs. {linea(d.get('monto_bs'), 12)}</b>"), ''],
-        [P(f"Por concepto de: {linea(d['por_concepto'], 55)}"), '', '', ''],
         [P(f"Costo del Plan: <b>${d['cuota']:.2f} mensuales</b> (Total del plan: ${d['total']:.2f})"), '', '', ''],
-        [P(f"Forma de pago: {linea(d['forma_pago'], 20)}"), '', '', ''],
     ]
 
     t_pago = Table(filas_pago, colWidths=[170, 170, 100, 100])
@@ -378,10 +395,7 @@ def generar_contrato_pdf(d, ruta_destino):
         ('SPAN', (0, 0), (3, 0)),
         ('SPAN', (0, 1), (3, 1)),
         ('SPAN', (0, 2), (3, 2)),
-        ('SPAN', (0, 3), (1, 3)),
-        ('SPAN', (0, 4), (3, 4)),
-        ('SPAN', (0, 5), (3, 5)),
-        ('SPAN', (0, 6), (3, 6)),
+        ('SPAN', (0, 3), (3, 3)),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
@@ -391,13 +405,10 @@ def generar_contrato_pdf(d, ruta_destino):
     story.append(Spacer(1, 6))
 
     # --- Tabla final: MONTO | CUOTAS | FECHAS | PLAN | FIRMA ---
-    check_a = "[X]" if d["plan"] == "A" else "[ ]"
-    check_b = "[X]" if d["plan"] == "B" else "[ ]"
-
     t_fin = Table([
         [P("MONTO", miniB), P("N° DE CUOTAS", miniB), P("FECHA DE EMISIÓN", miniB), P("FECHA DE VENCIMIENTO", miniB)],
         [P(f"${d['total']:.2f}"), P(str(d['cuotas'])), P(E(d['fecha_emision'])), P(E(d['fecha_vencimiento']))],
-        [P("<b>TIPO DE PLAN:</b>"), P(f"{check_a} PLAN A &nbsp;&nbsp; {check_b} PLAN B"), '', P("<b>TITULAR AFILIADO:</b><br/><br/>______________________")],
+        [P(f"<b>TIPO DE PLAN:</b><br/>{E(d['nombre_plan'])}"), '', '', P("<b>TITULAR AFILIADO:</b><br/><br/>______________________")],
     ], colWidths=[135, 135, 135, 135])
     t_fin.setStyle(TableStyle([
         ('GRID', (0, 0), (-1, -1), 0.7, NEGRO),
@@ -498,6 +509,7 @@ def abrir_modulo_contrato(ventana_padre, cedula):
     """
     Abre la ventana para emitir el contrato de un titular.
     Los datos del sistema se cargan solos; el operario completa el resto.
+    Navegación optimizada con tecla Enter.
     """
     datos_auto = consultar_datos_contrato(cedula)
 
@@ -507,7 +519,7 @@ def abrir_modulo_contrato(ventana_padre, cedula):
 
     pop = ctk.CTkToplevel(ventana_padre)
     pop.title(f"📄 Contrato - {datos_auto['titular']}")
-    pop.geometry("760x640")
+    pop.geometry("720x520")
     pop.grab_set()
 
     # -----------------------------------------------------------------
@@ -520,7 +532,7 @@ def abrir_modulo_contrato(ventana_padre, cedula):
         frame_auto,
         text=(
             f"Titular: {datos_auto['titular']}   |   C.I.: {datos_auto['cedula']}   |   Edad: {datos_auto['edad']}\n"
-            f"Contrato N°: {datos_auto['contrato_nuevo']}   |   Plan {datos_auto['plan']} ({datos_auto['tipo_contrato']})\n"
+            f"Contrato N°: {datos_auto['contrato_nuevo']}   |   Plan: {datos_auto['nombre_plan']}\n"
             f"Cuota: ${datos_auto['cuota']:.2f}   |   Cuotas: {datos_auto['cuotas']}   |   Total: ${datos_auto['total']:.2f}   |   Afiliados: {len(datos_auto['afiliados'])}"
         ),
         font=("Arial", 11, "bold"),
@@ -529,28 +541,24 @@ def abrir_modulo_contrato(ventana_padre, cedula):
     ).pack(pady=8, padx=10, anchor="w")
 
     # -----------------------------------------------------------------
-    # Campos que completa el operario
+    # Campos que completa el operario (optimizados)
     # -----------------------------------------------------------------
     frame_campos = ctk.CTkFrame(pop)
     frame_campos.pack(pady=5, padx=15, fill="both", expand=True)
 
     campos = {}
 
+    # Campos optimizados (eliminados: punto_ref, departamento, forma_pago, por_concepto, fecha_vencimiento)
     defs = [
         ("estado_civil", "Estado Civil:", "", 0, 0),
         ("nacionalidad", "Nacionalidad:", "Venezolana", 0, 1),
         ("profesion", "Profesión:", "", 0, 2),
-        ("punto_ref", "Punto de referencia:", "", 1, 0),
-        ("empresa", "Nombre de la empresa:", "", 1, 1),
-        ("departamento", "Departamento:", "", 1, 2),
-        ("dir_trabajo", "Dirección de oficina o trabajo:", "", 2, 0),
-        ("ext", "(Telf Trabajo):", "", 2, 1),
-        ("forma_pago", "Forma de pago:", "Efectivo USD", 2, 2),
-        ("inicial", "Inicial (USD):", str(datos_auto["cuota"]), 3, 0),
-        ("monto_bs", "Monto Bs. (inicial):", "", 3, 1),
-        ("por_concepto", "Por concepto de:", "Cuota inicial del plan de cobertura familiar", 3, 2),
-        ("fecha_emision", "Fecha de emisión:", datos_auto["fecha_emision"], 4, 0),
-        ("fecha_vencimiento", "Fecha de vencimiento:", datos_auto["fecha_vencimiento"], 4, 1),
+        ("empresa", "Nombre de la empresa:", "", 1, 0),
+        ("dir_trabajo", "Dirección de trabajo:", "", 1, 1),
+        ("ext", "Telf Trabajo:", "", 1, 2),
+        ("inicial", "Inicial (USD):", str(datos_auto["cuota"]), 2, 0),
+        ("monto_bs", "Monto Bs. (inicial):", "", 2, 1),
+        ("fecha_emision", "Fecha de elaboración:", datos_auto["fecha_emision"], 2, 2),
     ]
 
     for clave, texto, defecto, r, c in defs:
@@ -560,6 +568,15 @@ def abrir_modulo_contrato(ventana_padre, cedula):
             e.insert(0, defecto)
         e.grid(row=r * 2 + 1, column=c, padx=8, pady=(0, 6))
         campos[clave] = e
+
+    # Vincular navegación con Enter
+    lista_campos = [campos[clave] for clave, _, _, _, _ in defs]
+    for i in range(len(lista_campos) - 1):
+        vincular_salto_enter(lista_campos[i], lista_campos[i + 1])
+
+    # Poner foco en el primer campo
+    if lista_campos:
+        lista_campos[0].focus_set()
 
     # -----------------------------------------------------------------
     # Acciones: guardar PDF / imprimir / cerrar
@@ -614,7 +631,7 @@ def abrir_modulo_contrato(ventana_padre, cedula):
 
         try:
             os.startfile(ruta_temp, "print")
-            messagebox.showinfo("Imprimiendo", "🖨 Contrato enviado a la impresora.\n\nRecuerda imprimir a doble cara para que las cláusulas queden al reverso.")
+            messagebox.showinfo("Imprimiendo", " Contrato enviado a la impresora.\n\nRecuerda imprimir a doble cara para que las cláusulas queden al reverso.")
         except Exception:
             os.startfile(ruta_temp)
             messagebox.showwarning("Impresión", "No se pudo imprimir directo.\nEl contrato se abrió en el visor: imprime con Ctrl + P (doble cara).")
@@ -622,6 +639,6 @@ def abrir_modulo_contrato(ventana_padre, cedula):
     frame_bot = ctk.CTkFrame(pop, fg_color="transparent")
     frame_bot.pack(pady=10, padx=15, fill="x")
 
-    ctk.CTkButton(frame_bot, text="💾 Guardar PDF", fg_color="#1f538d", font=("Arial", 12, "bold"), command=guardar_pdf).pack(side="left", padx=5)
+    ctk.CTkButton(frame_bot, text=" Guardar PDF", fg_color="#1f538d", font=("Arial", 12, "bold"), command=guardar_pdf).pack(side="left", padx=5)
     ctk.CTkButton(frame_bot, text="🖨 Imprimir", fg_color="#8e44ad", font=("Arial", 12, "bold"), command=imprimir).pack(side="left", padx=5)
     ctk.CTkButton(frame_bot, text="Cerrar", fg_color="#7f8c8d", command=pop.destroy).pack(side="right", padx=5)
