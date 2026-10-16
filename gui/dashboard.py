@@ -1706,7 +1706,7 @@ def mostrar_dashboard(usuario_actual="admin"):
                 es_renovacion = "renovacion anual" in plan_norm
                 es_renovacion_despues_ppa = es_renovacion and "velacion" in plan_norm
 
-                # Calcular el número de cuota que se está pagando
+                                # Calcular el número de cuota que se está pagando
                 if "24 meses" in plan_norm:
                     cuota_numero = min(24, total_cuotas_nuevo)
 
@@ -1774,7 +1774,8 @@ def mostrar_dashboard(usuario_actual="admin"):
                 # -------------------------------------------------------------
 
                 # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
-                if "24 meses" in plan_norm and total_cuotas_nuevo == 24:
+                # Incluye el caso especial: titular con 24 cuotas previas que paga su primera cuota en el sistema
+                if "24 meses" in plan_norm and (total_cuotas_nuevo == 24 or (recibos_previos >= 24 and pagos_sistema_previos == 0)):
 
                     if "entierro" in plan_norm:
                         nuevo_plan = "RENOVACION ANUAL 12 MESES - VELACION + ENTIERRO"
@@ -1791,6 +1792,10 @@ def mostrar_dashboard(usuario_actual="admin"):
 
                     conn.commit()
                     tipo_contrato_global[0] = nuevo_plan
+                    
+                    # Recalcular cuota_numero basado en el nuevo contrato de 12 meses
+                    # Este es el primer pago del nuevo contrato, así que cuota_numero = 1
+                    cuota_numero = 1
 
                     messagebox.showinfo(
                         "¡Contrato Renovado!",
@@ -1832,7 +1837,7 @@ def mostrar_dashboard(usuario_actual="admin"):
                                 "El contrato continuará activo para el siguiente período de 12 meses."
                             )
 
-                # -------------------------------------------------------------
+                                # -------------------------------------------------------------
                 # PREPARAR DATOS PARA EL RECIBO PDF
                 # -------------------------------------------------------------
                 cursor.execute("""
@@ -1844,19 +1849,34 @@ def mostrar_dashboard(usuario_actual="admin"):
                 tit_datos = cursor.fetchone()
                 nombre_cliente_limpio = f"{tit_datos[0]} {tit_datos[1]}".upper() if tit_datos else cedula_actual
 
-                # Generar texto descriptivo de la cuota pagada
-                if "24 meses" in plan_norm or "ppa" in plan_norm:
+                # -------------------------------------------------------------
+                # Texto descriptivo de la cuota pagada.
+                # Detecta si el pago es el primero de una renovación
+                # (caso: 24 cuotas previas + primer pago en el sistema)
+                # para mostrar correctamente "Cuota #1 de 12".
+                # -------------------------------------------------------------
+                es_primer_pago_renovacion = (recibos_previos >= 24 and pagos_sistema_previos == 0)
+
+                if es_primer_pago_renovacion:
+                    # Primer pago después de completar 24 cuotas:
+                    # el contrato ya se renovó a 12 meses, cuota #1 de 12.
+                    cuotas_rest = max(0, 12 - cuota_numero)
+                    if "entierro" in plan_norm:
+                        cuota_str = f"Renovación + Entierro -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
+                    else:
+                        cuota_str = f"Renovación -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
+
+                elif "24 meses" in plan_norm or "ppa" in plan_norm:
                     cuotas_rest = max(0, 24 - cuota_numero)
-                    cuota_str = f"Cuota #{cuota_numero} de 24 (Canceladas: {cuota_numero}/24 | Restantes: {cuotas_rest})"
+                    cuota_str = f"Cuota #{cuota_numero:02d} de 24 (Canceladas: {cuota_numero}/24 | Restantes: {cuotas_rest})"
 
                 elif "renovacion anual" in plan_norm and "entierro" in plan_norm:
                     cuotas_rest = max(0, 12 - cuota_numero)
-                    cuota_str = f"Ciclo Renovación + Entierro -> Cuota #{cuota_numero} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
+                    cuota_str = f"Renovación + Entierro -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
 
                 else:
                     cuotas_rest = max(0, 12 - cuota_numero)
-                    cuota_str = f"Ciclo Renovación -> Cuota #{cuota_numero} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
-
+                    cuota_str = f"Renovación -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
                 # Diccionario con todos los datos del recibo
                 datos_recibo = {
                     "num_recibo": recibo_a_guardar,
