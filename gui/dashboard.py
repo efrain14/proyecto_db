@@ -169,15 +169,15 @@ def obtener_monto_usd_plan(tipo_contrato):
     """
     Devuelve el monto en USD de la cuota según el plan del titular.
     Regla de negocio:
-      - Si el plan incluye 'entierro', la cuota es $20.
-      - En cualquier otro caso, la cuota es $10.
-    No existe cuota de $12.
+    - Si el plan incluye 'entierro', la cuota es $20.
+    - Si el plan incluye '$15', la cuota es $15.
+    - En cualquier otro caso, la cuota es $10.
     """
     plan = (tipo_contrato or "").lower()
-
     if "entierro" in plan:
         return 20.0
-
+    if "$15" in plan:
+        return 15.0
     return 10.0
 
 
@@ -545,15 +545,19 @@ def mostrar_dashboard(usuario_actual="admin"):
 
     ctk.CTkLabel(frame_form_reg, text="Tipo de Contrato:", font=("Arial", 11, "bold")).grid(row=6, column=2, padx=10, sticky="w")
     combo_contrato = ctk.CTkComboBox(
-        frame_form_reg,
-        values=[
-            "PPA velación 24 meses",
-            "PPA velación + entierro 24 meses",
-            "renovación anual 12 meses",
-            "renovación anual + entierro 12 meses"
-        ],
-        width=280
-    )
+    frame_form_reg,
+    values=[
+        "PPA velación 24 meses ($15)",
+        "PPA velación 24 meses",
+        "PPA velación + entierro 24 meses",
+        "renovación anual 12 meses ($15)",
+        "renovación anual 12 meses",
+        "renovación anual + entierro 12 meses"
+    ],
+    width=280
+)
+    combo_contrato.set("PPA velación 24 meses ($15)")
+    
     combo_contrato.grid(row=7, column=2, padx=10, pady=(2, 10))
 
     # Navegación con Enter en PESTAÑA 1 (orden de transcripción)
@@ -1160,7 +1164,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         txt_correo.delete(0, "end")
         txt_direccion.delete(0, "end")
         txt_notas_registro.delete("1.0", "end")
-        combo_contrato.set("PPA velación 24 meses")
+        combo_contrato.set("PPA velación 24 meses ($15)")
 
         lbl_edad_titular.configure(text=" Edad: -- años ")
 
@@ -1635,11 +1639,17 @@ def mostrar_dashboard(usuario_actual="admin"):
                 return
 
             # -----------------------------------------------------------------
+            # -----------------------------------------------------------------
             # VALIDACIÓN DE COINCIDENCIA DE MONTOS
-            # Regla: Si el plan tiene "entierro" → $20, si no → $10
+            # Regla: Si el plan tiene "entierro" → $20, si tiene "$15" → $15, si no → $10
             # -----------------------------------------------------------------
             plan_monto_txt = (tipo_contrato_global[0] or "").lower()
-            usd_plan = 20.0 if "entierro" in plan_monto_txt else 10.0
+            if "entierro" in plan_monto_txt:
+                usd_plan = 20.0
+            elif "$15" in plan_monto_txt:
+                usd_plan = 15.0
+            else:
+                usd_plan = 10.0
 
             monto_esperado = usd_plan * tasa_val_num
 
@@ -1776,10 +1786,12 @@ def mostrar_dashboard(usuario_actual="admin"):
                 # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
                 # Incluye el caso especial: titular con 24 cuotas previas que paga su primera cuota en el sistema
                 if "24 meses" in plan_norm and (total_cuotas_nuevo == 24 or (recibos_previos >= 24 and pagos_sistema_previos == 0)):
-
                     if "entierro" in plan_norm:
                         nuevo_plan = "RENOVACION ANUAL 12 MESES - VELACION + ENTIERRO"
                         precio_nuevo = "$20.00"
+                    elif "$15" in plan_actual:
+                        nuevo_plan = "RENOVACION ANUAL 12 MESES ($15)"
+                        precio_nuevo = "$15.00"
                     else:
                         nuevo_plan = "RENOVACION ANUAL 12 MESES - VELACION"
                         precio_nuevo = "$10.00"

@@ -152,13 +152,20 @@ def consultar_datos_contrato(cedula):
     tipo = t[6] or ""
     tipo_lower = tipo.lower()
 
-    # Determinar el nombre completo del plan
+# Determinar el nombre completo del plan
     if "entierro" in tipo_lower:
         if "renovación" in tipo_lower or "renovacion" in tipo_lower:
             nombre_plan = "RENOVACIÓN ANUAL + ENTIERRO 12 MESES"
             cuotas = 12
         else:
             nombre_plan = "PPA VELACIÓN + ENTIERRO 24 MESES"
+            cuotas = 24
+    elif "$15" in tipo_lower:
+        if "renovación" in tipo_lower or "renovacion" in tipo_lower:
+            nombre_plan = "RENOVACIÓN ANUAL 12 MESES ($15)"
+            cuotas = 12
+        else:
+            nombre_plan = "PPA VELACIÓN 24 MESES ($15)"
             cuotas = 24
     else:
         if "renovación" in tipo_lower or "renovacion" in tipo_lower:
@@ -168,7 +175,13 @@ def consultar_datos_contrato(cedula):
             nombre_plan = "PPA VELACIÓN 24 MESES"
             cuotas = 24
 
-    cuota = 20.0 if "entierro" in tipo_lower else 10.0
+# Determinar la cuota según el plan
+    if "entierro" in tipo_lower:
+        cuota = 20.0
+    elif "$15" in tipo_lower:
+        cuota = 15.0
+    else:
+        cuota = 10.0
 
     hoy = datetime.now()
     vencimiento = hoy + timedelta(days=30)
