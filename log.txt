@@ -1,0 +1,18 @@
+>>> ENTRÉ A mostrar_dashboard <<<
+invalid command name "2103270603776update"
+    while executing
+"2103270603776update"
+    ("after" script)
+invalid command name "2103309132992check_dpi_scaling"
+    while executing
+"2103309132992check_dpi_scaling"
+    ("after" script)
+>>> PUNTO A: pestañas creadas <<<
+>>> PUNTO B: llegué a callbacks pestaña 5 <<<
+>>> PUNTO C: usuarios cargados <<<
+>>> LLEGUÉ A LA SECCIÓN DE BOTONES <<<
+>>> PUNTO D: a punto de entrar a mainloop <<<
+>>> DIAG: existe= 1 | state= withdrawn | visible= 0 | geometry= 1150x850+78+78
+>>> DIAG: existe= 1 | state= withdrawn | visible= 0 | geometry= 1150x850+78+78
+>>> AUTO-CIERRE DE EMERGENCIA <<<
+>>> MAINLOOP TERMINÓ: el programa va a salir <<<

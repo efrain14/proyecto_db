@@ -334,7 +334,8 @@ def mostrar_dashboard(usuario_actual="admin"):
     Recibe el nombre del usuario autenticado para mostrar en el título
     y determinar si tiene permisos de administrador.
     """
-
+    print(">>> ENTRÉ A mostrar_dashboard <<<", flush=True)   # ← AGREGAR
+    asegurar_esquema_pagos()
     # Preparar tabla de pagos para recibos únicos y cuota_numero
     asegurar_esquema_pagos()
 
@@ -355,45 +356,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
     ventana.geometry("1150x850")
 
-    # Ocultar temporalmente la ventana principal mientras se muestra el splash
-    ventana.withdraw()
 
-    # -----------------------------------------------------------------
-    # SPLASH DE CARGA (ventana de espera)
-    # -----------------------------------------------------------------
-    splash = ctk.CTkToplevel(ventana)
-    splash.title("Cargando sistema")
-    splash.geometry("420x200")
-    splash.resizable(False, False)
-    splash.configure(fg_color="#101010")
-    splash.attributes("-topmost", True)
-    splash.transient(ventana)
-    splash.grab_set()
-
-    # Centrar el splash en la pantalla
-    splash.update_idletasks()
-    x = (splash.winfo_screenwidth() // 2) - (420 // 2)
-    y = (splash.winfo_screenheight() // 2) - (200 // 2)
-    splash.geometry(f"420x200+{x}+{y}")
-
-    ctk.CTkLabel(
-        splash,
-        text="Sistema Funerario",
-        font=("Arial", 18, "bold")
-    ).pack(pady=(25, 5))
-
-    ctk.CTkLabel(
-        splash,
-        text="Cargando panel de control...",
-        font=("Arial", 12)
-    ).pack(pady=(0, 10))
-
-    barra_splash = ctk.CTkProgressBar(splash, width=260)
-    barra_splash.set(0.25)
-    barra_splash.pack(pady=5)
-
-    splash.update_idletasks()
-    splash.update()
 
     # -----------------------------------------------------------------
     # Registrar validadores de entrada en la ventana
@@ -437,7 +400,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # La pestaña de Configuración solo aparece si el usuario es administrador
     if es_admin:
         tab_config = pestanas.add("Configuración")
-
+    
     # -----------------------------------------------------------------
     # Variables globales internas del dashboard
     # Se usan listas para permitir modificación dentro de funciones anidadas
@@ -750,25 +713,24 @@ def mostrar_dashboard(usuario_actual="admin"):
 
     tabla_ed = ttk.Treeview(
         tabla_ed_frame,
-        columns=("id", "cedula", "nombres", "apellidos", "parentesco", "f_nac", "edad"),
+        columns=("id", "cedula", "nombres", "apellidos", "parentesco", "f_nac", "edad", "fallecido", "fecha_servicio"),
         show="headings",
         height=4
-    )
-
+)
     for c, t, w in [
-        ("id", "ID", 60),
-        ("cedula", "Cédula", 110),
-        ("nombres", "Nombres", 150),
-        ("apellidos", "Apellidos", 150),
-        ("parentesco", "Parentesco", 120),
-        ("f_nac", "F. Nacimiento", 120),
-        ("edad", "Edad", 90)
-    ]:
+        ("id", "ID", 40),
+        ("cedula", "Cédula", 85),
+        ("nombres", "Nombres", 110),
+        ("apellidos", "Apellidos", 110),
+        ("parentesco", "Parentesco", 80),
+        ("f_nac", "F. Nac.", 85),
+        ("edad", "Edad", 55),
+        ("fallecido", "Fallec.", 60),
+        ("fecha_servicio", "F. Servicio", 85)
+]:
         tabla_ed.heading(c, text=t)
         tabla_ed.column(c, width=w, anchor="center")
-
     tabla_ed.pack(fill="both", expand=True)
-    
     # =========================================================================
     # PESTAÑA 3: CONTROL DE COBROS Y PAGOS
     # =========================================================================
@@ -1260,16 +1222,24 @@ def mostrar_dashboard(usuario_actual="admin"):
                 tabla_ed.delete(item)
 
             cursor.execute(
-                "SELECT id, cedula, nombres, apellidos, parentesco, fecha_nacimiento FROM familiares WHERE titular_cedula = ?",
+                "SELECT id, cedula, nombres, apellidos, parentesco, fecha_nacimiento, fallecido, fecha_servicio FROM familiares WHERE titular_cedula = ?",
                 (res[0],)
-            )
-
+)
             for f in cursor.fetchall():
                 edad_calc = f"{calcular_edad_exacta(f[5])} años" if f[5] else "N/A"
-                tabla_ed.insert("", "end", values=(f[0], f[1], f[2].title(), f[3].title(), f[4].title(), f[5] or "N/A", edad_calc))
+                fallecido_txt = "SÍ" if f[6] else "NO"
+                fecha_serv_txt = f[7] or ""
+                item_id = tabla_ed.insert("", "end", values=(f[0], f[1], f[2].title(), f[3].title(), f[4].title(), f[5] or "N/A", edad_calc, fallecido_txt, fecha_serv_txt))
+    
+                # Si el afiliado está fallecido, pintarlo de rojo
+                if f[6]:
+                    tabla_ed.item(item_id, tags=("fallecido",))
 
-            # Habilitar botones de acción
-            for b in [btn_actualizar, btn_retirar_fam, btn_add_fam_ed]:
+# Configurar el tag de color rojo para afiliados fallecidos
+            tabla_ed.tag_configure("fallecido", foreground="red")
+
+# Habilitar botones de acción
+            for b in [btn_actualizar, btn_retirar_fam, btn_add_fam_ed, btn_fallecimiento]:
                 b.configure(state="normal")
 
             txt_ed_nom.focus()
@@ -1359,6 +1329,166 @@ def mostrar_dashboard(usuario_actual="admin"):
             messagebox.showinfo("Éxito", "Familiar retirado.")
             cargar_datos_edicion()
             refrescar_tabla_familiares(cedula_titular_edicion[0])
+
+    def registrar_fallecimiento_afiliado():
+        """
+        Abre un modal para registrar el fallecimiento de un afiliado.
+        Permite seleccionar un afiliado y ingresar la fecha del servicio.
+        """
+        if not cedula_titular_edicion[0]:
+            messagebox.showwarning("Sin Titular", "Debe buscar un titular primero.")
+            return
+    
+    # Obtener la lista de afiliados del titular
+        conn = conectar()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, nombres, apellidos, cedula, fallecido FROM familiares WHERE titular_cedula = ?",
+            (cedula_titular_edicion[0],)
+    )
+        afiliados = cursor.fetchall()
+        conn.close()
+    
+        if not afiliados:
+            messagebox.showinfo("Sin Afiliados", "Este titular no tiene afiliados registrados.")
+            return
+    
+    # Crear ventana modal
+        top_fall = ctk.CTkToplevel(ventana)
+        top_fall.title("Registrar Fallecimiento")
+        top_fall.geometry("500x400")
+        top_fall.grab_set()
+    
+        ctk.CTkLabel(
+            top_fall,
+            text="⚰️ Registrar Fallecimiento de Afiliado",
+            font=("Arial", 14, "bold"),
+            text_color="#c0392b"
+        ).pack(pady=(15, 10), padx=20, anchor="w")
+    
+    # Frame para seleccionar afiliado
+        frame_sel = ctk.CTkFrame(top_fall)
+        frame_sel.pack(pady=5, padx=20, fill="x")
+    
+        ctk.CTkLabel(frame_sel, text="Seleccione el Afiliado:", font=("Arial", 11, "bold")).pack(anchor="w", padx=10, pady=(5, 2))
+    
+    # Lista de afiliados (solo los que no están fallecidos)
+        afiliados_vivos = [a for a in afiliados if not a[4]]
+    
+        if not afiliados_vivos:
+            ctk.CTkLabel(
+                frame_sel,
+                text="Todos los afiliados ya están registrados como fallecidos.",
+                font=("Arial", 10, "italic"),
+                text_color="#7f8c8d"
+            ).pack(padx=10, pady=10)
+            ctk.CTkButton(top_fall, text="Cerrar", fg_color="#7f8c8d", command=top_fall.destroy).pack(pady=15)
+            return
+    
+        combo_afiliado = ctk.CTkComboBox(
+            frame_sel,
+            values=[f"{a[1].title()} {a[2].title()} (C.I: {a[3]})" for a in afiliados_vivos],
+            width=400
+    )
+        combo_afiliado.pack(padx=10, pady=5)
+        combo_afiliado.set(combo_afiliado.cget("values")[0] if combo_afiliado.cget("values") else "")
+    
+    # Campo de fecha del servicio
+        frame_fecha = ctk.CTkFrame(top_fall)
+        frame_fecha.pack(pady=10, padx=20, fill="x")
+    
+        ctk.CTkLabel(frame_fecha, text="Fecha del Servicio (DD/MM/AAAA):", font=("Arial", 11, "bold")).pack(anchor="w", padx=10, pady=(5, 2))
+        txt_fecha_servicio = ctk.CTkEntry(
+            frame_fecha,
+            width=200,
+            placeholder_text="DD/MM/AAAA",
+            validate="key",
+            validatecommand=(v_fecha, '%P')
+        )
+        txt_fecha_servicio.pack(padx=10, pady=5)
+        txt_fecha_servicio.focus_set()
+    
+    # Función para guardar el fallecimiento
+        def guardar_fallecimiento():
+            seleccion = combo_afiliado.get()
+            if not seleccion:
+                messagebox.showwarning("Selección Requerida", "Debe seleccionar un afiliado.")
+                return
+        
+            fecha_serv = txt_fecha_servicio.get().strip()
+            if not fecha_serv:
+                messagebox.showwarning("Fecha Requerida", "Debe ingresar la fecha del servicio.")
+                txt_fecha_servicio.focus()
+                return
+        
+        # Validar formato de fecha
+            if not validar_fecha_ddmmyyyy(fecha_serv):
+                messagebox.showwarning("Fecha Inválida", "La fecha debe tener formato DD/MM/AAAA (Ej: 15/03/2024)")
+                txt_fecha_servicio.focus()
+                return
+        
+        # Obtener el ID del afiliado seleccionado
+            afiliado_sel = None
+            for a in afiliados_vivos:
+                nombre_completo = f"{a[1].title()} {a[2].title()} (C.I: {a[3]})"
+                if nombre_completo == seleccion:
+                    afiliado_sel = a
+                    break
+        
+            if not afiliado_sel:
+                messagebox.showerror("Error", "No se pudo identificar el afiliado seleccionado.")
+                return
+        
+        # Confirmar antes de guardar
+            if not messagebox.askyesno(
+                "Confirmar Fallecimiento",
+                f"¿Está seguro de registrar el fallecimiento de:\n\n"
+                f"{afiliado_sel[1].title()} {afiliado_sel[2].title()}\n"
+                f"C.I: {afiliado_sel[3]}\n"
+                f"Fecha del servicio: {fecha_serv}\n\n"
+                f"Esta acción no se puede deshacer."
+        ):
+                return
+        
+        # Guardar en la base de datos
+            try:
+                conn = conectar()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE familiares SET fallecido = 1, fecha_servicio = ? WHERE id = ?",
+                    (fecha_serv, afiliado_sel[0])
+                )
+                conn.commit()
+                conn.close()
+            
+                messagebox.showinfo("Éxito", "Fallecimiento registrado correctamente.")
+                top_fall.destroy()
+            
+            # Recargar los datos de edición para mostrar el afiliado en rojo
+                cargar_datos_edicion()
+            
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo guardar el fallecimiento:\n{e}")
+    
+    # Botón de guardar
+        ctk.CTkButton(
+            top_fall,
+            text="💾 Registrar Fallecimiento",
+            fg_color="#c0392b",
+            font=("Arial", 12, "bold"),
+            command=guardar_fallecimiento
+        ).pack(pady=15)
+    
+    # Vincular Enter para guardar
+        txt_fecha_servicio.bind("<Return>", lambda e: guardar_fallecimiento())
+    
+    # Botón de cerrar
+        ctk.CTkButton(
+            top_fall,
+            text="Cancelar",
+            fg_color="#7f8c8d",
+            command=top_fall.destroy
+        ).pack(pady=5)
 
     # =========================================================================
     # FUNCIONES CALLBACK - PESTAÑA 3: CONTROL DE PAGOS
@@ -1975,11 +2105,10 @@ def mostrar_dashboard(usuario_actual="admin"):
     def construir_datos_reporte_afiliados():
         """
         Consulta la base de datos y devuelve una lista de filas en texto plano.
-        Cada fila: [cédula, nombre, contrato, afiliados, tipo, pagadas, faltantes]
+        Cada fila: [cédula, nombre, contrato, afiliados, tipo, pagadas, faltantes, afiliados_fallecidos]
         """
         conn = conectar()
         cursor = conn.cursor()
-
         cursor.execute("""
             SELECT 
                 t.cedula,
@@ -1989,16 +2118,15 @@ def mostrar_dashboard(usuario_actual="admin"):
                 t.tipo_contrato,
                 t.recibos_previos,
                 (SELECT COUNT(*) FROM familiares f WHERE f.titular_cedula = t.cedula) AS total_afiliados,
-                (SELECT COUNT(*) FROM pagos p WHERE p.titular_cedula = t.cedula) AS pagos_sistema
+                (SELECT COUNT(*) FROM pagos p WHERE p.titular_cedula = t.cedula) AS pagos_sistema,
+                (SELECT COUNT(*) FROM familiares f WHERE f.titular_cedula = t.cedula AND f.fallecido = 1) AS afiliados_fallecidos
             FROM titulares t
             ORDER BY t.contrato_nuevo ASC
         """)
-
         titulares = cursor.fetchall()
         conn.close()
-
+        
         filas = []
-
         for row in titulares:
             cedula = row[0] or ""
             nombres = (row[1] or "").title()
@@ -2008,17 +2136,18 @@ def mostrar_dashboard(usuario_actual="admin"):
             recibos_previos = row[5] or 0
             total_afiliados = row[6] or 0
             pagos_sistema = row[7] or 0
-
+            afiliados_fallecidos = row[8] or 0
+            
             cuotas_pagadas = recibos_previos + pagos_sistema
-
             tipo_lower = tipo_contrato.lower()
+            
             if "24 meses" in tipo_lower:
                 cuotas_totales = 24
             elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
                 cuotas_totales = 12
             else:
                 cuotas_totales = 24
-
+            
             if "24 meses" in tipo_lower:
                 cuotas_en_ciclo = cuotas_pagadas
                 cuotas_faltantes = max(0, cuotas_totales - cuotas_en_ciclo)
@@ -2032,17 +2161,22 @@ def mostrar_dashboard(usuario_actual="admin"):
                     if cuotas_en_ciclo == 0 and cuotas_pagadas > 0:
                         cuotas_en_ciclo = 12
                 cuotas_faltantes = max(0, 12 - cuotas_en_ciclo)
-
+            
+            # Información de afiliados fallecidos
+            afiliados_info = f"{total_afiliados} total"
+            if afiliados_fallecidos > 0:
+                afiliados_info += f" ({afiliados_fallecidos} fallecido{'s' if afiliados_fallecidos > 1 else ''})"
+            
             filas.append([
                 cedula,
                 f"{nombres} {apellidos}",
                 contrato_nuevo,
-                str(total_afiliados),
+                afiliados_info,
                 tipo_contrato,
                 f"{cuotas_en_ciclo}/{cuotas_totales}",
                 str(cuotas_faltantes)
             ])
-
+        
         return filas
 
     # =========================================================================
@@ -2413,11 +2547,11 @@ def mostrar_dashboard(usuario_actual="admin"):
                     "listo": True,
                     "titulo": "REPORTE DE AFILIADOS",
                     "lineas": [f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Sede: {SEDE_ACTUAL}"],
-                    "encabezados": ["Cédula", "Nombre Completo", "Contrato N°", "Afiliados", "Tipo de Contrato", "Cuotas Pagadas", "Cuotas Faltantes"],
+                    "encabezados": ["Cédula", "Nombre Completo", "Contrato N°", "Afiliados (Fallecidos)", "Tipo de Contrato", "Cuotas Pagadas", "Cuotas Faltantes"],
                     "filas": filas,
                     "anchos": [70, 150, 70, 55, 150, 75, 75],
                     "centradas": (0, 2, 3, 5, 6),
-                    "resumen": f"Total de titulares: {len(filas)} | Total de afiliados: {sum(int(f[3]) for f in filas)}",
+                    "resumen": f"Total de titulares: {len(filas)} | Total de afiliados: {sum(int(f[3].split()[0]) for f in filas)}",
                     "nombre": f"reporte_afiliados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                 })
 
@@ -2632,6 +2766,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # FUNCIONES CALLBACK - PESTAÑA 5: CONFIGURACIÓN (Solo Administradores)
     # =========================================================================
 
+    print(">>> PUNTO B: llegué a callbacks pestaña 5 <<<", flush=True)
     if es_admin:
         def ejecutar_respaldo():
             """
@@ -2824,6 +2959,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
         # Cargar la tabla de usuarios al iniciar
         refrescar_tabla_usuarios()
+    print(">>> PUNTO C: usuarios cargados <<<", flush=True)
 
     # =========================================================================
     # CONFIGURACIÓN DE BOTONES (Se asignan las funciones a cada botón)
@@ -2833,6 +2969,8 @@ def mostrar_dashboard(usuario_actual="admin"):
     # =========================================================================
 
     # --- PESTAÑA 1: Botones de Registro de Clientes ---
+    print(">>> LLEGUÉ A LA SECCIÓN DE BOTONES <<<")   # ← AGREGAR
+    
     frame_botones_registro = ctk.CTkFrame(tab_clientes, fg_color="transparent")
     frame_botones_registro.grid(row=4, column=0, columnspan=4, pady=15, padx=10, sticky="ew")
 
@@ -2869,7 +3007,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     btn_salir = ctk.CTkButton(frame_botones_registro, text="Salir del Sistema", fg_color="#d35400", command=ventana.destroy)
     btn_salir.pack(side="right", padx=5)
 
-    # --- PESTAÑA 2: Botones de Edición ---
+        # --- PESTAÑA 2: Botones de Edición ---
     frame_botones_ed = ctk.CTkFrame(tab_edicion, fg_color="transparent")
     frame_botones_ed.pack(pady=10, padx=10, fill="x")
 
@@ -2905,8 +3043,23 @@ def mostrar_dashboard(usuario_actual="admin"):
     )
     btn_add_fam_ed.grid(row=0, column=2, padx=5)
 
+    # Botón de Fallecimiento (nuevo)
+    btn_fallecimiento = ctk.CTkButton(
+        frame_botones_ed,
+        text="⚰️ Fallecimiento",
+        fg_color="#c0392b",
+        state="disabled",
+        command=lambda: registrar_fallecimiento_afiliado()
+    )
+    btn_fallecimiento.grid(row=0, column=3, padx=5)
+
     # Botón Salir de la pestaña de edición
-    ctk.CTkButton(frame_botones_ed, text="Salir", fg_color="#d35400", command=ventana.destroy).grid(row=0, column=3, padx=20)
+    ctk.CTkButton(
+        frame_botones_ed,
+        text="Salir",
+        fg_color="#d35400",
+        command=ventana.destroy
+    ).grid(row=0, column=4, padx=20)
 
     # Configurar el botón de búsqueda de la pestaña de edición
     btn_buscar_ed.configure(command=cargar_datos_edicion)
@@ -3011,7 +3164,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         for item in tabla_ed.get_children():
             tabla_ed.delete(item)
 
-        for b in [btn_actualizar, btn_retirar_fam, btn_add_fam_ed]:
+        for b in [btn_actualizar, btn_retirar_fam, btn_add_fam_ed, btn_fallecimiento]:
             b.configure(state="disabled")
 
         # Limpiar PESTAÑA 3: Pagos
@@ -3040,48 +3193,10 @@ def mostrar_dashboard(usuario_actual="admin"):
     # Vincular la limpieza al cambio de pestaña
     pestanas.configure(command=gestionar_limpieza_pestanas)
 
+        # =========================================================================
+    # INICIAR EL BUCLE PRINCIPAL DE LA APLICACIÓN
     # =========================================================================
-    # MOSTRAR SPLASH Y LUEGO DASHBOARD
-    # =========================================================================
-    # El splash se muestra durante 1.6 segundos mientras se carga
-    # la interfaz principal. Luego se destruye y aparece el dashboard.
-    # =========================================================================
-
-    def actualizar_barra_splash(valor):
-        """Actualiza la barra de progreso del splash de carga."""
-        try:
-            barra_splash.set(valor)
-        except Exception:
-            pass
-
-    def cerrar_splash():
-        """
-        Cierra la ventana del splash y muestra la ventana principal
-        del dashboard. Se ejecuta después de la animación de carga.
-        """
-        try:
-            splash.destroy()
-        except Exception:
-            pass
-
-        ventana.deiconify()
-        ventana.lift()
-        ventana.focus_force()
-
-    # Permitir cerrar el splash manualmente si el usuario lo cierra
-    splash.protocol("WM_DELETE_WINDOW", cerrar_splash)
-
-    # Pequeña animación de carga (la barra avanza en 3 pasos)
-    ventana.after(400, lambda: actualizar_barra_splash(0.55))
-    ventana.after(900, lambda: actualizar_barra_splash(0.80))
-    ventana.after(1300, lambda: actualizar_barra_splash(1.0))
-
-    # Mostrar el dashboard después del splash (1.6 segundos)
-    ventana.after(1600, cerrar_splash)
-
-    # Iniciar el bucle principal de la aplicación
     ventana.mainloop()
-
 
 # =========================================================================
 # 5. COMPONENTE MODAL: REGISTRO DE AFILIADOS

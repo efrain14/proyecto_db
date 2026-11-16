@@ -104,6 +104,22 @@ def inicializar_base_de_datos():
     except sqlite3.OperationalError: pass
     
     cursor.execute("UPDATE usuarios SET rol = 'admin' WHERE usuario = 'admin';")
+    
+# =========================================================================
+# MIGRACIÓN: Columnas para control de fallecimientos
+# =========================================================================
+    try:
+        cursor.execute("ALTER TABLE familiares ADD COLUMN fallecido INTEGER DEFAULT 0;")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE familiares ADD COLUMN fecha_servicio TEXT;")
+    except sqlite3.OperationalError:
+        pass    
+    
+    
+    
     conn.commit()
 
     # =========================================================================
