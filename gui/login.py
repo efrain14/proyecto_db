@@ -5,6 +5,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database.conexion import conectar
+from app_info import VERSION, FECHA_VERSION
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -31,7 +32,7 @@ def validar_login(txt_usuario, txt_contrasena, ventana_login, al_conectar_exito)
 
 def mostrar_ventana_login(funcion_menu_principal):
     root = ctk.CTk()
-    root.title("Sistema Funerario - Login")
+    root.title(f"Sistema Funerario - Login  |  v{VERSION}")
     
     ancho = 400
     alto = 350
@@ -66,5 +67,13 @@ def mostrar_ventana_login(funcion_menu_principal):
         command=lambda: validar_login(txt_usuario, txt_contrasena, root, funcion_menu_principal)
     )
     btn_ingresar.pack(pady=(20, 10))
-    
+
+    # --- Etiqueta de versión (pie de la ventana) ---
+    ctk.CTkLabel(
+        root,
+        text=f"Versión {VERSION}  •  {FECHA_VERSION}",
+        font=("Arial", 10),
+        text_color="#7f8c8d"
+    ).pack(side="bottom", pady=(0, 8))
+
     root.mainloop()

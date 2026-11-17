@@ -26,6 +26,7 @@ from gui.contrato_gui import abrir_modulo_contrato
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database.conexion import conectar, obtener_ruta_db
+from app_info import VERSION
 from logic.consultas import consultar_estado_cliente
 from gui.preview_recibo import abrir_previsualizacion_recibo
 #from gui.reportes_gui import renderizar_grafico_cobranza
@@ -352,7 +353,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # Crear la ventana principal
     # -----------------------------------------------------------------
     ventana = ctk.CTk()
-    ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
+    ventana.title(f"Sistema Funerario v{VERSION} - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
     ventana.geometry("1150x850")
 
     # -----------------------------------------------------------------
@@ -386,6 +387,14 @@ def mostrar_dashboard(usuario_actual="admin"):
         text="Cargando panel de control...",
         font=("Arial", 12)
     ).pack(pady=(0, 10))
+
+    
+    ctk.CTkLabel(
+        splash,
+        text=f"v{VERSION}",
+        font=("Arial", 10),
+        text_color="#7f8c8d"
+    ).pack(pady=(2, 0))
 
     barra_splash = ctk.CTkProgressBar(splash, width=260)
     barra_splash.set(0.25)
@@ -2583,7 +2592,7 @@ def mostrar_dashboard(usuario_actual="admin"):
                 datos_preview.update({
                     "listo": True,
                     "titulo": "REPORTE DE AFILIADOS",
-                    "lineas": [f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Sede: {SEDE_ACTUAL}"],
+                    "lineas": [f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Sede: {SEDE_ACTUAL} | Sistema v{VERSION}"],
                     "encabezados": ["Cédula", "Nombre Completo", "Contrato N°", "Afiliados (Fallecidos)", "Tipo de Contrato", "Cuotas Pagadas", "Cuotas Faltantes"],
                     "filas": filas,
                     "anchos": [70, 150, 70, 55, 150, 75, 75],
