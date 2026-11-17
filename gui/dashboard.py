@@ -334,8 +334,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     Recibe el nombre del usuario autenticado para mostrar en el título
     y determinar si tiene permisos de administrador.
     """
-    print(">>> ENTRÉ A mostrar_dashboard <<<", flush=True)   # ← AGREGAR
-    asegurar_esquema_pagos()
+    
     # Preparar tabla de pagos para recibos únicos y cuota_numero
     asegurar_esquema_pagos()
 
@@ -356,11 +355,49 @@ def mostrar_dashboard(usuario_actual="admin"):
     ventana.title(f"Sistema Funerario - Panel de Control (Sede {SEDE_ACTUAL} | Usuario: {usuario_actual} [{rol_usuario.upper()}])")
     ventana.geometry("1150x850")
 
+    # -----------------------------------------------------------------
+    # SPLASH DE CARGA (ventana de espera) - VERSIÓN SEGURA
+    # -----------------------------------------------------------------
+    ventana.withdraw()  # Ocultar la ventana principal hasta terminar la carga
 
+    splash = ctk.CTkToplevel(ventana)
+    splash.title("Cargando sistema")
+    splash.geometry("420x200")
+    splash.resizable(False, False)
+    splash.configure(fg_color="#101010")
+    splash.attributes("-topmost", True)
+    splash.transient(ventana)
+    # NOTA: NO se usa grab_set() a propósito, para evitar bloqueos
+
+    # Centrar el splash en la pantalla
+    splash.update_idletasks()
+    x = (splash.winfo_screenwidth() // 2) - (420 // 2)
+    y = (splash.winfo_screenheight() // 2) - (200 // 2)
+    splash.geometry(f"420x200+{x}+{y}")
+
+    ctk.CTkLabel(
+        splash,
+        text="Sistema Funerario",
+        font=("Arial", 18, "bold")
+    ).pack(pady=(25, 5))
+
+    ctk.CTkLabel(
+        splash,
+        text="Cargando panel de control...",
+        font=("Arial", 12)
+    ).pack(pady=(0, 10))
+
+    barra_splash = ctk.CTkProgressBar(splash, width=260)
+    barra_splash.set(0.25)
+    barra_splash.pack(pady=5)
+
+    splash.update_idletasks()
+    splash.update()
 
     # -----------------------------------------------------------------
     # Registrar validadores de entrada en la ventana
     # -----------------------------------------------------------------
+    
     v_numeros_puro = ventana.register(validar_solo_numeros)
     v_letras = ventana.register(validar_solo_letras)
     v_monto_decimal = ventana.register(validar_monto_decimal)
@@ -2766,7 +2803,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # FUNCIONES CALLBACK - PESTAÑA 5: CONFIGURACIÓN (Solo Administradores)
     # =========================================================================
 
-    print(">>> PUNTO B: llegué a callbacks pestaña 5 <<<", flush=True)
+    
     if es_admin:
         def ejecutar_respaldo():
             """
@@ -2959,7 +2996,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
         # Cargar la tabla de usuarios al iniciar
         refrescar_tabla_usuarios()
-    print(">>> PUNTO C: usuarios cargados <<<", flush=True)
+    
 
     # =========================================================================
     # CONFIGURACIÓN DE BOTONES (Se asignan las funciones a cada botón)
@@ -2969,7 +3006,7 @@ def mostrar_dashboard(usuario_actual="admin"):
     # =========================================================================
 
     # --- PESTAÑA 1: Botones de Registro de Clientes ---
-    print(">>> LLEGUÉ A LA SECCIÓN DE BOTONES <<<")   # ← AGREGAR
+    
     
     frame_botones_registro = ctk.CTkFrame(tab_clientes, fg_color="transparent")
     frame_botones_registro.grid(row=4, column=0, columnspan=4, pady=15, padx=10, sticky="ew")
@@ -3193,9 +3230,42 @@ def mostrar_dashboard(usuario_actual="admin"):
     # Vincular la limpieza al cambio de pestaña
     pestanas.configure(command=gestionar_limpieza_pestanas)
 
-        # =========================================================================
-    # INICIAR EL BUCLE PRINCIPAL DE LA APLICACIÓN
     # =========================================================================
+    # CIERRE DEL SPLASH Y ARRANQUE DEL BUCLE PRINCIPAL
+    # =========================================================================
+    def actualizar_barra_splash(valor):
+        """Avanza la barra del splash (con guarda de existencia)."""
+        try:
+            if splash.winfo_exists():
+                barra_splash.set(valor)
+        except Exception:
+            pass
+
+    def cerrar_splash():
+        """Destruye el splash y SIEMPRE muestra la ventana principal."""
+        try:
+            if splash.winfo_exists():
+                splash.destroy()
+        except Exception:
+            pass
+        try:
+            ventana.deiconify()
+            ventana.lift()
+            ventana.focus_force()
+        except Exception:
+            pass
+
+    # Si el usuario cierra el splash con la X, también se muestra el dashboard
+    splash.protocol("WM_DELETE_WINDOW", cerrar_splash)
+
+    # Animación de la barra + cierre a los 1.6 s
+    # (se ejecutan DENTRO del mainloop, cuando deiconify sí funciona en Windows)
+    ventana.after(400, lambda: actualizar_barra_splash(0.55))
+    ventana.after(900, lambda: actualizar_barra_splash(0.80))
+    ventana.after(1300, lambda: actualizar_barra_splash(1.0))
+    ventana.after(1600, cerrar_splash)
+
+    # Iniciar el bucle principal de la aplicación
     ventana.mainloop()
 
 # =========================================================================
