@@ -7,6 +7,6 @@ Actualizarlo cada vez que se libere una nueva versión o se compile un .exe.
 =========================================================================
 """
 
-VERSION = "1.4.0"
-FECHA_VERSION = "16/11/2026"
+VERSION = "1.4.1"
+FECHA_VERSION = "17/11/2026"
 NOMBRE_SISTEMA = "Sistema Funerario"

@@ -1645,14 +1645,13 @@ def mostrar_dashboard(usuario_actual="admin"):
             total_pagados = recibos_previos + pagos_sistema
 
             # Calcular cuotas según el tipo de plan
-            if "24 meses" in res[5].lower():
+            if "24 meses" in res[5].lower() and total_pagados < 24:
                 cuotas_totales_plan = 24
-                cuotas_restantes = max(0, cuotas_totales_plan - total_pagados)
+                cuotas_restantes = max(0, 24 - total_pagados)
                 status_cuotas_texto = f"Cuotas Canceladas: {total_pagados} / 24 | Restantes: {cuotas_restantes}"
             else:
                 cuotas_totales_plan = 12
-                cuotas_en_renovacion = total_pagados - 24 if total_pagados >= 24 else total_pagados
-                pagadas_ciclo = cuotas_en_renovacion % 12
+                pagadas_ciclo = total_pagados % 12
                 cuotas_restantes = max(0, 12 - pagadas_ciclo)
                 status_cuotas_texto = f"Ciclo Renovación -> Pagadas: {pagadas_ciclo} / 12 | Restantes: {cuotas_restantes}"
 
@@ -1890,22 +1889,19 @@ def mostrar_dashboard(usuario_actual="admin"):
                                       .replace("ñ", "n"))
 
                 es_renovacion = "renovacion anual" in plan_norm
-                es_renovacion_despues_ppa = es_renovacion and "velacion" in plan_norm
 
-                                # Calcular el número de cuota que se está pagando
-                if "24 meses" in plan_norm:
-                    cuota_numero = min(24, total_cuotas_nuevo)
-
-                elif es_renovacion and not es_renovacion_despues_ppa:
-                    # Renovación independiente (no viene después de PPA)
-                    cuota_numero = ((total_cuotas_nuevo - 1) % 12) + 1 if total_cuotas_nuevo > 0 else 1
-
-                elif total_cuotas_nuevo > 24:
-                    # Renovación que viene después de un PPA de 24 meses
-                    cuota_numero = ((total_cuotas_nuevo - 24 - 1) % 12) + 1
-
+            # ---------------------------------------------------------
+            # NÚMERO DE CUOTA (lógica unificada)
+            # - PPA de 24 meses: cuotas 1..24 mientras el total <= 24.
+            # - Si el total ya pasó de 24, el pago pertenece a un ciclo
+            #   de renovación de 12 cuotas.
+            # - Como 24 es múltiplo de 12, el módulo 12 sobre el total
+            #   acumulado alinea SIEMPRE los ciclos de renovación.
+            # ---------------------------------------------------------
+                if "24 meses" in plan_norm and total_cuotas_nuevo <= 24:
+                    cuota_numero = total_cuotas_nuevo
                 else:
-                    cuota_numero = ((total_cuotas_nuevo - 1) % 12) + 1 if total_cuotas_nuevo > 0 else 1
+                    cuota_numero = ((total_cuotas_nuevo - 1) % 12) + 1
 
                 # Calcular próximo recibo único
                 recibo_a_guardar = obtener_siguiente_recibo(cursor)
@@ -1955,13 +1951,24 @@ def mostrar_dashboard(usuario_actual="admin"):
 
                 conn.commit()
 
-                # -------------------------------------------------------------
-                # LÓGICA DE RENOVACIÓN AUTOMÁTICA DE PLANES
-                # -------------------------------------------------------------
+            # Guardar el plan y la cuota de ESTE pago para el recibo.
+            # La renovación cambia el plan del titular, pero el recibo
+            # debe reflejar la cuota que realmente se acaba de pagar.
+                plan_norm_recibo = plan_norm
+                cuota_numero_recibo = cuota_numero
 
-                # CASO 1: Planes PPA de 24 meses que alcanzan la cuota 24
-                # Incluye el caso especial: titular con 24 cuotas previas que paga su primera cuota en el sistema
-                if "24 meses" in plan_norm and (total_cuotas_nuevo == 24 or (recibos_previos >= 24 and pagos_sistema_previos == 0)):
+
+            # -------------------------------------------------------------
+            # LÓGICA DE RENOVACIÓN AUTOMÁTICA DE PLANES
+            # -------------------------------------------------------------
+                es_plan_ppa = "24 meses" in plan_norm
+                # ¿Este pago ES exactamente la cuota 24 (la transición)?
+                es_pago_que_completa_ppa = es_plan_ppa and total_cuotas_nuevo == 24
+                # ¿El PPA ya estaba completo de antes y nunca se renombró?
+                es_ppa_ya_vencido = es_plan_ppa and total_cuotas_nuevo > 24
+
+                # CASO 1: El contrato pasa de PPA (24) a RENOVACIÓN (12)
+                if es_pago_que_completa_ppa or es_ppa_ya_vencido:
                     if "entierro" in plan_norm:
                         nuevo_plan = "RENOVACION ANUAL 12 MESES - VELACION + ENTIERRO"
                         precio_nuevo = "$20.00"
@@ -1977,55 +1984,65 @@ def mostrar_dashboard(usuario_actual="admin"):
                         SET tipo_contrato = ? 
                         WHERE cedula = ?
                     """, (nuevo_plan, cedula_actual))
-
                     conn.commit()
                     tipo_contrato_global[0] = nuevo_plan
-                    
-                    # Recalcular cuota_numero basado en el nuevo contrato de 12 meses
-                    # Este es el primer pago del nuevo contrato, así que cuota_numero = 1
-                    cuota_numero = 1
 
+                    # NOTA: NO se modifica cuota_numero. El pago registrado
+                    # pertenece al plan anterior; el próximo tomará 1 de 12.
+
+                    if es_pago_que_completa_ppa:
+                        messagebox.showinfo(
+                            "¡Contrato Renovado!",
+                            f"🎉 El titular ha completado la CUOTA 24 de 24 del plan anterior.\n\n"
+                            f"Su contrato se ha renovado automáticamente al plan:\n"
+                            f"• {nuevo_plan}\n"
+                            f"• Cuota mensual asignada: {precio_nuevo}\n\n"
+                            f"⚠️ IMPORTANTE: el PRÓXIMO pago será la CUOTA 1 de 12\n"
+                            f"del nuevo plan de renovación."
+                        )
+                    else:
+                        cuota_renov = ((total_cuotas_nuevo - 24 - 1) % 12) + 1
+                        messagebox.showinfo(
+                            "Contrato Actualizado a Renovación",
+                            f"ℹ️ Este titular ya tenía completas las 24 cuotas del plan anterior.\n\n"
+                            f"El contrato se ha actualizado al plan:\n"
+                            f"• {nuevo_plan}\n"
+                            f"• Cuota mensual asignada: {precio_nuevo}\n\n"
+                            f"El pago que se acaba de registrar corresponde a la\n"
+                            f"CUOTA {cuota_renov} de 12 del plan de renovación."
+                        )
+
+                # CASO 2: Primera cuota del plan de renovación (aviso claro)
+                elif es_renovacion and cuota_numero == 1:
+                    etiqueta_plan = "Renovación Anual + Entierro" if "entierro" in plan_norm else "Renovación Anual"
+                    if total_cuotas_nuevo > 24:
+                        detalle = "El plan anterior de 24 cuotas ya fue completado.\nSe inicia un nuevo ciclo de 12 cuotas."
+                    else:
+                        detalle = "Se inicia un ciclo de 12 cuotas."
                     messagebox.showinfo(
-                        "¡Contrato Renovado!",
-                        f"🎉 El titular ha completado la cuota N° 24.\n\n"
-                        f"Su contrato se ha renovado automáticamente al plan:\n"
-                        f"• {nuevo_plan}\n"
-                        f"• Cuota mensual asignada: {precio_nuevo}"
+                        "Cuota 1 de 12 - Plan de Renovación",
+                        f"✅ Está cobrando la CUOTA 1 de 12 del plan de renovación.\n\n"
+                        f"• Plan: {etiqueta_plan}\n"
+                        f"• Contrato: {plan_actual}\n\n"
+                        f"{detalle}"
                     )
 
-                # CASO 2: Renovación independiente que completa un ciclo de 12
-                elif es_renovacion and not es_renovacion_despues_ppa:
-                    if total_cuotas_nuevo > 0 and total_cuotas_nuevo % 12 == 0:
-                        if "entierro" in plan_norm:
-                            messagebox.showinfo(
-                                "¡Renovación Anual + Entierro Completada!",
-                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual + Entierro.\n\n"
-                                "El contrato continuará activo para el siguiente período de 12 meses."
-                            )
-                        else:
-                            messagebox.showinfo(
-                                "¡Renovación Anual Completada!",
-                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
-                                "El contrato continuará activo para el siguiente período de 12 meses."
-                            )
+                # CASO 3: Se completa un ciclo de 12 cuotas de renovación
+                elif es_renovacion and cuota_numero == 12:
+                    if "entierro" in plan_norm:
+                        messagebox.showinfo(
+                            "¡Renovación Anual + Entierro Completada!",
+                            "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual + Entierro.\n\n"
+                            "El contrato continuará activo para el siguiente período de 12 meses."
+                        )
+                    else:
+                        messagebox.showinfo(
+                            "¡Renovación Anual Completada!",
+                            "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
+                            "El contrato continuará activo para el siguiente período de 12 meses."
+                        )
 
-                # CASO 3: Renovación después de PPA que completa un ciclo de 12
-                elif es_renovacion and es_renovacion_despues_ppa:
-                    if total_cuotas_nuevo > 24 and ((total_cuotas_nuevo - 24) % 12 == 0):
-                        if "entierro" in plan_norm:
-                            messagebox.showinfo(
-                                "¡Renovación Anual + Entierro Completada!",
-                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual + Entierro.\n\n"
-                                "El contrato continuará activo para el siguiente período de 12 meses."
-                            )
-                        else:
-                            messagebox.showinfo(
-                                "¡Renovación Anual Completada!",
-                                "🎉 El titular ha completado las 12 cuotas del ciclo de Renovación Anual.\n\n"
-                                "El contrato continuará activo para el siguiente período de 12 meses."
-                            )
-
-                                # -------------------------------------------------------------
+                # -------------------------------------------------------------
                 # PREPARAR DATOS PARA EL RECIBO PDF
                 # -------------------------------------------------------------
                 cursor.execute("""
@@ -2037,34 +2054,26 @@ def mostrar_dashboard(usuario_actual="admin"):
                 tit_datos = cursor.fetchone()
                 nombre_cliente_limpio = f"{tit_datos[0]} {tit_datos[1]}".upper() if tit_datos else cedula_actual
 
-                # -------------------------------------------------------------
-                # Texto descriptivo de la cuota pagada.
-                # Detecta si el pago es el primero de una renovación
-                # (caso: 24 cuotas previas + primer pago en el sistema)
-                # para mostrar correctamente "Cuota #1 de 12".
-                # -------------------------------------------------------------
-                es_primer_pago_renovacion = (recibos_previos >= 24 and pagos_sistema_previos == 0)
+            # ---------------------------------------------------------
+            # Texto de la cuota para el recibo.
+            # Usa el plan y la cuota congelados ANTES de la renovación.
+            # ---------------------------------------------------------
+                es_pago_ppa = ("24 meses" in plan_norm_recibo) and (total_cuotas_nuevo <= 24)
 
-                if es_primer_pago_renovacion:
-                    # Primer pago después de completar 24 cuotas:
-                    # el contrato ya se renovó a 12 meses, cuota #1 de 12.
-                    cuotas_rest = max(0, 12 - cuota_numero)
-                    if "entierro" in plan_norm:
-                        cuota_str = f"Renovación + Entierro -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
-                    else:
-                        cuota_str = f"Renovación -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
-
-                elif "24 meses" in plan_norm or "ppa" in plan_norm:
-                    cuotas_rest = max(0, 24 - cuota_numero)
-                    cuota_str = f"Cuota #{cuota_numero:02d} de 24 (Canceladas: {cuota_numero}/24 | Restantes: {cuotas_rest})"
-
-                elif "renovacion anual" in plan_norm and "entierro" in plan_norm:
-                    cuotas_rest = max(0, 12 - cuota_numero)
-                    cuota_str = f"Renovación + Entierro -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
-
+                if es_pago_ppa:
+                    cuotas_rest = max(0, 24 - cuota_numero_recibo)
+                    cuota_str = (
+                        f"Cuota #{cuota_numero_recibo:02d} de 24 "
+                        f"(Canceladas: {cuota_numero_recibo}/24 | Restantes: {cuotas_rest})"
+                )
                 else:
-                    cuotas_rest = max(0, 12 - cuota_numero)
-                    cuota_str = f"Renovación -> Cuota #{cuota_numero:02d} de 12 (Canceladas: {cuota_numero}/12 | Restantes: {cuotas_rest})"
+                    cuotas_rest = max(0, 12 - cuota_numero_recibo)
+                    etiqueta = "Renovación + Entierro" if "entierro" in plan_norm_recibo else "Renovación"
+                    cuota_str = (
+                        f"{etiqueta} -> Cuota #{cuota_numero_recibo:02d} de 12 "
+                        f"(Canceladas: {cuota_numero_recibo}/12 | Restantes: {cuotas_rest})"
+                )
+                    
                 # Diccionario con todos los datos del recibo
                 datos_recibo = {
                     "num_recibo": recibo_a_guardar,
