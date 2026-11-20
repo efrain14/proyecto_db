@@ -11,18 +11,17 @@ from database.conexion import conectar
 def obtener_costo_mensual(tipo_contrato):
     """
     Devuelve el costo mensual en USD según el plan.
-
-    Solo existen cuotas de $10 y $20.
-    La renovación anual debe conservar el monto del plan original:
-
+    IMPORTANTE: debe coincidir con obtener_monto_usd_plan() del dashboard.
     - $20 si el plan incluye entierro.
-    - $10 en caso contrario.
+    - $15 si es el plan actualizado ($15).
+    - $10 en cualquier otro caso.
+    La renovación anual conserva el monto del plan original.
     """
     plan = (tipo_contrato or "").lower()
-
     if "entierro" in plan:
         return 20.0
-
+    if "$15" in plan:
+        return 15.0
     return 10.0
 
 

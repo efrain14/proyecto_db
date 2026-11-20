@@ -278,22 +278,17 @@ def obtener_siguiente_recibo(cursor):
 
 def calcular_cuota_numero(tipo_contrato, total_cuotas):
     """
-    Calcula el número de cuota que se está pagando según el tipo de plan.
-    - Planes PPA de 24 meses: cuota 1 a 24.
-    - Planes de renovación de 12 meses: cuota 1 a 12 por ciclo.
+    Calcula el número de cuota según el plan y el total acumulado.
+    IMPORTANTE: debe coincidir con la lógica de ejecutar_pago().
+    - PPA 24 meses: cuotas 1..24 mientras el total <= 24.
+    - Si el total pasa de 24 (o el plan es de renovación): ciclo de 12.
     """
     plan = (tipo_contrato or "").lower()
-
     if total_cuotas <= 0:
         return 1
-
-    if "24 meses" in plan:
-        return min(24, total_cuotas)
-
-    if total_cuotas > 24:
-        return ((total_cuotas - 24) % 12) or 12
-
-    return (total_cuotas % 12) or 12
+    if "24 meses" in plan and total_cuotas <= 24:
+        return total_cuotas
+    return ((total_cuotas - 1) % 12) + 1
 
 
 def generar_siguiente_contrato():
@@ -1382,7 +1377,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         Permite seleccionar un afiliado y ingresar la fecha del servicio.
         """
         if not cedula_titular_edicion[0]:
-            messagebox.showwarning("Sin Titular", "Debe buscar un titular primero.")
+            messagebox.showwarning("Sin Titular", "Debe buscar un titular primero.", parent=ventana)
             return
     
     # Obtener la lista de afiliados del titular
@@ -1396,7 +1391,7 @@ def mostrar_dashboard(usuario_actual="admin"):
         conn.close()
     
         if not afiliados:
-            messagebox.showinfo("Sin Afiliados", "Este titular no tiene afiliados registrados.")
+            messagebox.showinfo("Sin Afiliados", "Este titular no tiene afiliados registrados.", parent=ventana)
             return
     
     # Crear ventana modal
@@ -1458,18 +1453,18 @@ def mostrar_dashboard(usuario_actual="admin"):
         def guardar_fallecimiento():
             seleccion = combo_afiliado.get()
             if not seleccion:
-                messagebox.showwarning("Selección Requerida", "Debe seleccionar un afiliado.")
+                messagebox.showwarning("Selección Requerida", "Debe seleccionar un afiliado.", parent=top_fall)
                 return
         
             fecha_serv = txt_fecha_servicio.get().strip()
             if not fecha_serv:
-                messagebox.showwarning("Fecha Requerida", "Debe ingresar la fecha del servicio.")
+                messagebox.showwarning("Fecha Requerida", "Debe ingresar la fecha del servicio.", parent=top_fall)
                 txt_fecha_servicio.focus()
                 return
         
         # Validar formato de fecha
             if not validar_fecha_ddmmyyyy(fecha_serv):
-                messagebox.showwarning("Fecha Inválida", "La fecha debe tener formato DD/MM/AAAA (Ej: 15/03/2024)")
+                messagebox.showwarning("Fecha Inválida", "La fecha debe tener formato DD/MM/AAAA (Ej: 15/03/2024)", parent=top_fall)
                 txt_fecha_servicio.focus()
                 return
         
@@ -1482,7 +1477,7 @@ def mostrar_dashboard(usuario_actual="admin"):
                     break
         
             if not afiliado_sel:
-                messagebox.showerror("Error", "No se pudo identificar el afiliado seleccionado.")
+                messagebox.showerror("Error", "No se pudo identificar el afiliado seleccionado.", parent=top_fall)
                 return
         
         # Confirmar antes de guardar
@@ -1492,7 +1487,8 @@ def mostrar_dashboard(usuario_actual="admin"):
                 f"{afiliado_sel[1].title()} {afiliado_sel[2].title()}\n"
                 f"C.I: {afiliado_sel[3]}\n"
                 f"Fecha del servicio: {fecha_serv}\n\n"
-                f"Esta acción no se puede deshacer."
+                f"Esta acción no se puede deshacer.",
+                parent=top_fall
         ):
                 return
         
@@ -1507,14 +1503,14 @@ def mostrar_dashboard(usuario_actual="admin"):
                 conn.commit()
                 conn.close()
             
-                messagebox.showinfo("Éxito", "Fallecimiento registrado correctamente.")
+                messagebox.showinfo("Éxito", "Fallecimiento registrado correctamente.", parent=top_fall)
                 top_fall.destroy()
             
             # Recargar los datos de edición para mostrar el afiliado en rojo
                 cargar_datos_edicion()
             
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo guardar el fallecimiento:\n{e}")
+                messagebox.showerror("Error", f"No se pudo guardar el fallecimiento:\n{e}", parent=top_fall)
     
     # Botón de guardar
         ctk.CTkButton(
@@ -1606,7 +1602,7 @@ def mostrar_dashboard(usuario_actual="admin"):
             command=top_notas.destroy
         ).pack(pady=10)
 
-    def buscar_y_calcular_pagos():
+    def buscar_y_calcular_pagos(avisar_moroso=True):
         """
         Busca un titular por cédula o contrato, calcula el estado de sus pagos
         (cuotas pagadas, restantes, morosidad) y actualiza la interfaz.
@@ -1674,6 +1670,43 @@ def mostrar_dashboard(usuario_actual="admin"):
             else:
                 if estado["moroso"]:
                     lbl_aviso_morosidad.configure(text=f"ESTADO: MOROSO (Debe ${estado['deuda_usd']:.2f})", text_color="red")
+
+                # ---------------------------------------------------------
+                # AVISO EMERGENTE DE MOROSIDAD
+                # ---------------------------------------------------------
+                if avisar_moroso:
+                    cuotas_vencidas = max(
+                        0,
+                        estado.get("meses_transcurridos", 0) - estado.get("cuotas_pagadas", 0)
+                    )
+
+                    # Datos del último pago para dar contexto al operador
+                    cursor.execute(
+                        "SELECT MAX(fecha_pago) FROM pagos WHERE titular_cedula = ?",
+                        (cedula_real,)
+                    )
+                    fila_ult = cursor.fetchone()
+                    ultima_fecha = fila_ult[0] if fila_ult else None
+
+                    if ultima_fecha:
+                        try:
+                            f_ult = datetime.strptime(ultima_fecha, "%Y-%m-%d")
+                            dias = (datetime.now() - f_ult).days
+                            info_pago = f"Último pago: {f_ult.strftime('%d/%m/%Y')} (hace {dias} días)"
+                        except Exception:
+                            info_pago = f"Último pago: {ultima_fecha}"
+                    else:
+                        info_pago = "Sin pagos registrados en el sistema"
+
+                    messagebox.showwarning(
+                        "⚠️ CLIENTE MOROSO",
+                        f"El titular {res[0].upper()} {res[1].upper()} tiene cuotas vencidas.\n\n"
+                        f"• Cuotas vencidas: {cuotas_vencidas}\n"
+                        f"• Deuda total: ${estado['deuda_usd']:.2f} USD\n"
+                        f"• {info_pago}\n\n"
+                        f"Cobre las cuotas pendientes antes de continuar.",
+                        parent=ventana
+                    )
                 elif estado["deuda_usd"] > 0:
                     lbl_aviso_morosidad.configure(
                         text=f"ESTADO: AL DÍA / SOLVENTE (Pendiente próxima cuota de {cuotas_totales_plan})",
@@ -2101,7 +2134,7 @@ def mostrar_dashboard(usuario_actual="admin"):
 
                 # Refrescar la pantalla antes de abrir el recibo
                 try:
-                    buscar_y_calcular_pagos()
+                    buscar_y_calcular_pagos(avisar_moroso=False)
                 except Exception as e_refresh:
                     print(f"Aviso al refrescar la pantalla: {e_refresh}")
 
@@ -2196,25 +2229,15 @@ def mostrar_dashboard(usuario_actual="admin"):
             cuotas_pagadas = recibos_previos + pagos_sistema
             tipo_lower = tipo_contrato.lower()
             
-            if "24 meses" in tipo_lower:
+        # Alineado con la lógica unificada de ejecutar_pago():
+        # PPA de 24 meses mientras el total <= 24; si no, ciclo de 12.
+            if "24 meses" in tipo_lower and cuotas_pagadas <= 24:
                 cuotas_totales = 24
-            elif "renovación" in tipo_lower or "renovacion" in tipo_lower:
-                cuotas_totales = 12
-            else:
-                cuotas_totales = 24
-            
-            if "24 meses" in tipo_lower:
                 cuotas_en_ciclo = cuotas_pagadas
-                cuotas_faltantes = max(0, cuotas_totales - cuotas_en_ciclo)
+                cuotas_faltantes = max(0, 24 - cuotas_en_ciclo)
             else:
-                if cuotas_pagadas > 24:
-                    cuotas_en_ciclo = (cuotas_pagadas - 24) % 12
-                    if cuotas_en_ciclo == 0 and cuotas_pagadas > 24:
-                        cuotas_en_ciclo = 12
-                else:
-                    cuotas_en_ciclo = cuotas_pagadas % 12
-                    if cuotas_en_ciclo == 0 and cuotas_pagadas > 0:
-                        cuotas_en_ciclo = 12
+                cuotas_totales = 12
+                cuotas_en_ciclo = cuotas_pagadas % 12
                 cuotas_faltantes = max(0, 12 - cuotas_en_ciclo)
             
             # Información de afiliados fallecidos
